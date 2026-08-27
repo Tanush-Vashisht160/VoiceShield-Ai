@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables / secrets
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Model files
+models/
+model_cache/
+hf_cache/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+
+# Dataset
+data/
+*.wav
+*.mp3
+*.flac
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Streamlit
+.streamlit/secrets.toml

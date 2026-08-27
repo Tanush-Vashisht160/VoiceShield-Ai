@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="VoiceShield AI - Real-time AI voice cloning and impersonation detection">
+    <title>VoiceShield AI | Voice Security Firewall</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body>
+
+    <!-- ======================================================
+         BACKGROUND EFFECTS
+    ======================================================= -->
+
+    <div class="background-grid"></div>
+    <div class="background-glow glow-one"></div>
+    <div class="background-glow glow-two"></div>
+
+
+    <!-- ======================================================
+         APPLICATION
+    ======================================================= -->
+
+    <div class="app-shell">
+
+        <!-- ==================================================
+             HEADER
+        =================================================== -->
+
+        <header class="topbar">
+
+            <div class="brand">
+                <div class="brand-mark">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+
+                <div>
+                    <div class="brand-name">
+                        VoiceShield<span> AI</span>
+                    </div>
+
+                    <div class="brand-subtitle">
+                        VOICE SECURITY FIREWALL
+                    </div>
+                </div>
+            </div>
+
+            <div class="system-status">
+                <div class="status-dot"></div>
+
+                <div>
+                    <span class="status-label">
+                        SYSTEM
+                    </span>
+
+                    <span id="system-status" class="status-value">
+                        ONLINE
+                    </span>
+                </div>
+            </div>
+
+        </header>
+
+
+        <!-- ==================================================
+             HERO
+        =================================================== -->
+
+        <main>
+
+            <section class="hero">
+                <div class="hero-content">
+                    <div class="eyebrow">
+                        AI-POWERED VOICE PROTECTION
+                    </div>
+
+                    <h1>
+                        Detect cloned voices
+                        <span>before they become threats.</span>
+                    </h1>
+
+                    <p>
+                        VoiceShield AI analyzes voice authenticity,
+                        speaker identity, and security risk to detect
+                        AI-generated impersonation attacks.
+                    </p>
+                </div>
+            </section>
+
+
+            <!-- ==================================================
+                 ANALYSIS WORKSPACE
+            =================================================== -->
+
+            <section class="workspace">
+
+                <!-- ==============================================
+                     UPLOAD PANEL (SECTION 01)
+                =============================================== -->
+
+                <div class="glass-card upload-card">
+
+                    <div class="card-header">
+                        <div>
+                            <span class="section-number">01</span>
+                            <h2>Audio Analysis</h2>
+                        </div>
+                        <span class="card-tag">INPUT</span>
+                    </div>
+
+                    <!-- DROP ZONE -->
+                    <div id="drop-zone" class="drop-zone">
+                        <input
+                            type="file"
+                            id="audio-input"
+                            accept=".wav,.mp3,.flac,.ogg,.webm,.m4a,.aac,.opus,.oga,audio/*"
+                            hidden
+                        >
+
+                        <div class="upload-icon">
+                            <div class="upload-arrow">↑</div>
+                        </div>
+
+                        <h3>Drop audio here</h3>
+                        <p>or click to browse your device</p>
+                        <span class="supported-formats">
+                            WAV · MP3 · FLAC · OGG · WEBM · M4A
+                        </span>
+                    </div>
+
+                    <!-- SELECTED FILE -->
+                    <div id="file-preview" class="file-preview hidden">
+                        <div class="file-icon">AUDIO</div>
+                        <div class="file-info">
+                            <strong id="file-name">audio.wav</strong>
+                            <span id="file-size">0 MB</span>
+                        </div>
+                        <button id="remove-file" class="icon-button" type="button">
+                            ×
+                        </button>
+                    </div>
+
+                    <!-- ANALYZE BUTTON -->
+                    <button
+                        id="analyze-button"
+                        class="primary-button"
+                        type="button"
+                        disabled
+                    >
+                        <span>ANALYZE VOICE</span>
+                        <span class="button-arrow">→</span>
+                    </button>
+
+                    <!-- LIVE CALL CONTROLS -->
+                    <div class="live-call-control">
+                        <button
+                            id="live-call-button"
+                            class="live-call-button"
+                            type="button"
+                        >
+                            <span
+                                class="mic-icon"
+                                aria-hidden="true"
+                            ></span>
+                            START LIVE CALL
+                        </button>
+
+                        <span
+                            id="live-call-control-status"
+                            class="live-call-status"
+                        >
+                            READY
+                        </span>
+
+                        <button
+                            id="test-notification-button"
+                            class="notification-test-button"
+                            type="button"
+                        >
+                            TEST ALERT
+                        </button>
+                    </div>
+
+                </div>
+
+
+                <!-- ==============================================
+                     SECURITY STATUS (SECTION 02)
+                =============================================== -->
+
+                <div class="glass-card status-card">
+
+                    <div class="card-header">
+                        <div>
+                            <span class="section-number">02</span>
+                            <h2>Security Status</h2>
+                        </div>
+                        <span id="result-tag" class="card-tag">WAITING</span>
+                    </div>
+
+                    <!-- INITIAL STATE -->
+                    <div id="initial-state" class="state-panel">
+                        <div class="shield-icon">◇</div>
+                        <h3>System ready</h3>
+                        <p>Upload an audio sample to begin security analysis.</p>
+                    </div>
+
+                    <!-- LOADING STATE -->
+                    <div id="loading-state" class="state-panel hidden">
+                        <div class="loader"></div>
+                        <h3>Analyzing voice</h3>
+                        <p>Running multi-layer security checks...</p>
+                        <div class="analysis-steps">
+                            <div><span></span>Voice authenticity</div>
+                            <div><span></span>Speaker identity</div>
+                            <div><span></span>Risk assessment</div>
+                        </div>
+                    </div>
+
+                    <!-- RESULT STATE -->
+                    <div id="result-state" class="hidden">
+                        <div class="result-main">
+                            <div id="prediction-badge" class="prediction-badge">
+                                REAL
+                            </div>
+                            <h3 id="prediction-text">
+                                Authentic voice detected
+                            </h3>
+                            <p id="prediction-description">
+                                No significant synthetic voice indicators detected.
+                            </p>
+                        </div>
+
+                        <div class="confidence-row">
+                            <div>
+                                <span>Confidence</span>
+                                <strong id="confidence-value">0.00%</strong>
+                            </div>
+                            <div class="confidence-track">
+                                <div id="confidence-bar" class="confidence-fill"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- ==================================================
+                 SECURITY METRICS (SECTION 03)
+            =================================================== -->
+
+            <section id="metrics-section" class="metrics-section hidden">
+
+                <div class="section-heading">
+                    <div>
+                        <span class="section-number">03</span>
+                        <h2>Security Intelligence</h2>
+                    </div>
+                    <span>MULTI-LAYER ANALYSIS</span>
+                </div>
+
+                <div class="metrics-grid">
+
+                    <!-- VOICE -->
+                    <div class="metric-card glass-card">
+                        <div class="metric-top">
+                            <span>VOICE AUTHENTICITY</span>
+                            <span class="metric-icon">◉</span>
+                        </div>
+                        <div id="voice-authenticity" class="metric-value">—</div>
+                        <div class="metric-bar">
+                            <div id="fake-score-bar" class="metric-fill"></div>
+                        </div>
+                        <div class="metric-footer">
+                            <span>Fake probability</span>
+                            <strong id="fake-probability">—</strong>
+                        </div>
+                    </div>
+
+                    <!-- SPEAKER -->
+                    <div class="metric-card glass-card">
+                        <div class="metric-top">
+                            <span>SPEAKER IDENTITY</span>
+                            <span class="metric-icon">◌</span>
+                        </div>
+                        <div id="speaker-identity" class="metric-value">N/A</div>
+                        <div class="metric-bar">
+                            <div id="speaker-bar" class="metric-fill"></div>
+                        </div>
+                        <div class="metric-footer">
+                            <span>Verification</span>
+                            <strong id="speaker-verification">Not provided</strong>
+                        </div>
+                    </div>
+
+                    <!-- CONTEXT -->
+                    <div class="metric-card glass-card">
+                        <div class="metric-top">
+                            <span>CONTEXT RISK</span>
+                            <span class="metric-icon">!</span>
+                        </div>
+                        <div id="context-risk" class="metric-value">LOW</div>
+                        <div class="metric-bar">
+                            <div id="context-bar" class="metric-fill"></div>
+                        </div>
+                        <div class="metric-footer">
+                            <span>Threat level</span>
+                            <strong id="context-threat">0.00%</strong>
+                        </div>
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- ==================================================
+                 RISK ASSESSMENT (SECTION 04 & 05)
+            =================================================== -->
+
+            <section id="risk-section" class="risk-section hidden">
+
+                <!-- SECTION 04: THREAT ASSESSMENT -->
+                <div class="glass-card risk-card">
+
+                    <div class="risk-left">
+                        <span class="section-number">04</span>
+                        <h2>Threat Assessment</h2>
+                        <p>
+                            Combined security intelligence from the VoiceShield analysis engine.
+                        </p>
+                        <div id="risk-action" class="action-badge">—</div>
+                    </div>
+
+                    <div class="risk-score-container">
+                        <div class="risk-ring">
+                            <svg viewBox="0 0 220 220">
+                                <circle class="risk-ring-bg" cx="110" cy="110" r="92"></circle>
+                                <circle id="risk-ring-progress" class="risk-ring-progress" cx="110" cy="110" r="92"></circle>
+                            </svg>
+                            <div class="risk-number">
+                                <strong id="risk-score">0</strong>
+                                <span>/ 100</span>
+                            </div>
+                        </div>
+                        <div id="risk-level" class="risk-level">
+                            LOW RISK
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- SECTION 05: SECURITY FINDINGS -->
+                <div class="glass-card reasons-card">
+
+                    <div class="card-header">
+                        <div>
+                            <span class="section-number">05</span>
+                            <h2>Security Findings</h2>
+                        </div>
+                    </div>
+
+                    <div id="security-findings" class="security-findings">
+                        <div class="finding safe">
+                            <span class="finding-icon">✓</span>
+                            <span>Run an analysis to view security findings.</span>
+                        </div>
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- ==================================================
+                 REAL-TIME ANALYSIS (SECTION 06)
+            =================================================== -->
+
+            <section id="realtime-section" class="realtime-section hidden">
+
+                <div class="section-heading">
+                    <div>
+                        <span class="section-number">06</span>
+                        <h2>Real-Time Audio Analysis</h2>
+                    </div>
+                    <span>CHUNK INTELLIGENCE</span>
+                </div>
+
+                <div
+                    id="chunk-timeline-card"
+                    class="glass-card timeline-card hidden"
+                >
+                    <div id="chunk-timeline" class="chunk-timeline"></div>
+                </div>
+
+                <!-- LIVE CALL STREAMING PANEL -->
+                <div id="live-call-panel" class="live-call-panel hidden">
+                    <div class="live-call-monitor">
+
+                        <div class="live-call-topbar">
+
+                            <div class="live-call-status-wrap">
+
+                                <span
+                                    id="live-listening-indicator"
+                                    class="live-listening-indicator">
+                                </span>
+
+                                <span id="live-call-status">
+                                    LISTENING
+                                </span>
+
+                            </div>
+
+                            <span
+                                id="live-call-duration"
+                                class="live-call-duration">
+                                00:00
+                            </span>
+
+                        </div>
+
+                        <div class="live-waveform-container">
+
+                            <canvas
+                                id="live-waveform">
+                            </canvas>
+
+                        </div>
+
+                        <div class="live-processing-row">
+
+                            <span id="live-processing-status">
+                                LISTENING
+                            </span>
+
+                            <span
+                                id="live-risk-trend"
+                                class="risk-trend stable">
+                                RISK STABLE
+                            </span>
+
+                        </div>
+
+                    </div>
+
+                    <div class="live-call-grid">
+
+                        <div class="live-metric">
+                            <span class="live-metric-label">
+                                CURRENT VOICE
+                            </span>
+
+                            <strong id="live-prediction">
+                                WAITING
+                            </strong>
+                        </div>
+                        <div class="live-metric">
+                            <span class="live-metric-label">
+                                FAKE PROBABILITY
+                            </span>
+
+                            <strong id="live-fake-score">
+                                0.00%
+                            </strong>
+                        </div>
+
+                        <div class="live-metric">
+                            <span class="live-metric-label">
+                                RISK SCORE
+                            </span>
+
+                            <strong id="live-risk-score">
+                                0
+                            </strong>
+                        </div>
+
+                        <div class="live-metric">
+                            <span class="live-metric-label">
+                                ACTION
+                            </span>
+
+                            <strong id="live-action">
+                                ALLOW
+                            </strong>
+                        </div>
+
+                    </div>
+
+                    <div class="live-timeline">
+                        <div class="live-timeline-title">
+                            LIVE DETECTION TIMELINE
+                        </div>
+
+                        <div id="live-timeline"></div>
+                    </div>
+                </div>
+
+            </section>
+
+
+            <!-- ==================================================
+                 FOOTER
+            =================================================== -->
+
+            <footer>
+                <div>VOICESHIELD AI</div>
+                <span>AI-POWERED VOICE CLONING PROTECTION</span>
+                <span>SYSTEM v1.0</span>
+            </footer>
+
+        </main>
+
+    </div>
+
+
+    <!-- SECURITY NOTIFICATIONS -->
+    <script src="/js/notifications.js"></script>
+
+    <!-- APPLICATION JS -->
+    <script src="/js/app.js"></script>
+
+</body>
+</html>

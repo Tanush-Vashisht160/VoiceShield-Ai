@@ -1,0 +1,17 @@
+torch==2.13.0
+transformers==4.41.2
+accelerate==0.33.0
+safetensors>=0.4.3
+
+numpy<2
+soundfile==0.12.1
+librosa==0.10.2.post1
+scipy>=1.11,<1.14
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+python-dotenv==1.0.1
+
+pytest==8.3.4
