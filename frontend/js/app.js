@@ -543,43 +543,50 @@ function showFrontendError(message) {
    LIVE CALL ERROR
 ============================================================ */
 
-function showLiveCallError(message) {
+/* ============================================================
+   LIVE CALL ERROR HANDLER
+   ============================================================ */
+
+function showLiveCallError(
+    message
+) {
 
     console.error(
         "LIVE CALL ERROR:",
         message
     );
 
-    const status =
+    if (liveCallStatus) {
+
+        liveCallStatus.textContent =
+            "LIVE ERROR";
+
+    }
+
+    const processingStatus =
         document.getElementById(
-            "live-call-status"
+            "live-processing-status"
         );
 
-    if (status) {
+    if (processingStatus) {
 
-        status.textContent =
+        processingStatus.textContent =
             "LIVE ANALYSIS ERROR";
 
-        status.classList.add(
-            "error"
+        processingStatus.classList.remove(
+            "processing"
         );
+
     }
 
-    const indicator =
-        document.getElementById(
-            "live-status-indicator"
-        );
+    if (predictionDescription) {
 
-    if (indicator) {
+        predictionDescription.textContent =
+            message ||
+            "Live call analysis encountered an error.";
 
-        indicator.classList.remove(
-            "active"
-        );
-
-        indicator.classList.add(
-            "error"
-        );
     }
+
 }
 
 /* ============================================================
@@ -671,7 +678,6 @@ async function analyzeAudio(
         );
 
         return result;
-
     } catch (error) {
 
         console.error(
@@ -738,16 +744,7 @@ function renderAnalysis(data) {
         Number(
             detection.fake_score || 0
         );
-    /* ============================================================
-    DYNAMIC SECURITY THEME
-    Switch entire UI to RED when fake voice is detected
-    ============================================================ */
 
-    if (String(prediction).toLowerCase() === "fake") {
-        document.body.classList.add("security-danger");
-    } else {
-        document.body.classList.remove("security-danger");
-    }
     if (voiceResult) {
         voiceResult.textContent =
             prediction.toUpperCase();
@@ -1829,13 +1826,525 @@ let liveTimer = null;
 let liveCallActive = false;
 let liveMediaRecorder = null;
 let liveChunkTimer = null;
+/* ============================================================
+   LIVE TRANSCRIPTION
+   Browser speech recognition
+   ============================================================ */
+let liveSpeechRecognition = null;
+let liveTranscriptFinal = "";
+let liveTranscriptInterim = "";
+let liveProviderTranscript = "";
+let liveTranscriptProvider = null;
+let liveSpeechSupported = false;
+/* ============================================================
+   INITIALIZE LIVE TRANSCRIPTION
+   ============================================================ */
+
+function initializeLiveTranscription() {
+
+    const SpeechRecognition =
+        window.SpeechRecognition ||
+        window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+
+        console.warn(
+            "Speech Recognition API is not supported by this browser."
+        );
+
+        liveSpeechSupported =
+            false;
+
+        return;
+
+    }
+
+    liveSpeechSupported =
+        true;
+
+    liveSpeechRecognition =
+        new SpeechRecognition();
+
+    /*
+     * Continuous mode keeps listening while
+     * the live call is active.
+     */
+
+    liveSpeechRecognition.continuous =
+        true;
+
+    liveSpeechRecognition.interimResults =
+        true;
+
+    /*
+     * Change this later if you want Indian-language
+     * transcription.
+     *
+     * Examples:
+     *
+     * en-IN
+     * hi-IN
+     * en-US
+     */
+
+    liveSpeechRecognition.lang =
+        "en-IN";
+
+
+    liveSpeechRecognition.onresult =
+        (event) => {
+
+            let finalText = "";
+            let interimText = "";
+
+            for (
+                let i = event.resultIndex;
+                i < event.results.length;
+                i++
+            ) {
+
+                const transcript =
+                    event.results[i][0]
+                        .transcript;
+
+                if (
+                    event.results[i].isFinal
+                ) {
+
+                    finalText +=
+                        transcript + " ";
+
+                } else {
+
+                    interimText +=
+                        transcript;
+
+                }
+
+            }
+
+
+            if (finalText.trim()) {
+
+                liveTranscriptFinal +=
+                    finalText;
+
+            }
+
+
+            liveTranscriptInterim =
+                interimText;
+
+            updateLiveTranscriptDisplay();
+
+        };
+
+
+    liveSpeechRecognition.onerror =
+        (event) => {
+
+            /*
+             * Do not stop the security detector
+             * if transcription fails.
+             */
+
+            console.warn(
+                "Live transcription warning:",
+                event.error
+            );
+
+            updateLiveTranscriptStatus(
+                "TRANSCRIPTION UNAVAILABLE"
+            );
+
+        };
+
+
+    liveSpeechRecognition.onend =
+        () => {
+
+            /*
+             * Chrome may automatically end recognition.
+             *
+             * Restart only while the call is active.
+             */
+
+            if (
+                liveCallActive &&
+                liveSpeechRecognition
+            ) {
+
+                try {
+
+                    liveSpeechRecognition.start();
+
+                } catch (error) {
+
+                    console.warn(
+                        "Transcription restart skipped:",
+                        error
+                    );
+
+                }
+
+            }
+
+        };
+
+}
+/* ============================================================
+   LIVE TRANSCRIPT DISPLAY
+   ============================================================ */
+
+/* ============================================================
+   LIVE TRANSCRIPT DISPLAY
+   ------------------------------------------------------------
+   Creates a compact transcript panel inside the existing
+   live-call area. No HTML structure changes are required.
+============================================================ */
+
+function updateLiveTranscriptDisplay() {
+
+    /*
+     * Prefer the existing live monitor.
+     * If it is unavailable, fall back to the live call panel.
+     */
+
+    const monitor =
+        document.getElementById(
+            "vs-live-transcript"
+        ) ||
+        document.querySelector(
+            ".vs-live-monitor"
+        ) ||
+        liveCallPanel;
+
+    if (!monitor) {
+        console.warn(
+            "Live transcript target container not found."
+        );
+
+        return;
+    }
+
+    let transcriptBox =
+        document.getElementById(
+            "vs-live-transcript"
+        );
+
+    /*
+     * Create the transcript element once.
+     */
+
+    if (!transcriptBox) {
+
+        transcriptBox =
+            document.createElement(
+                "div"
+            );
+
+        transcriptBox.id =
+            "vs-live-transcript";
+
+        transcriptBox.setAttribute(
+            "aria-live",
+            "polite"
+        );
+
+        /*
+         * Keep the existing visual language.
+         * No new page structure is introduced.
+         */
+
+        transcriptBox.style.marginTop =
+            "12px";
+
+        transcriptBox.style.padding =
+            "10px 12px";
+
+        transcriptBox.style.borderTop =
+            "1px solid rgba(255,255,255,0.06)";
+
+        transcriptBox.style.fontSize =
+            "12px";
+
+        transcriptBox.style.lineHeight =
+            "1.6";
+
+        transcriptBox.style.opacity =
+            "0.9";
+
+        transcriptBox.style.minHeight =
+            "22px";
+
+        transcriptBox.style.maxHeight =
+            "90px";
+
+        transcriptBox.style.overflowY =
+            "auto";
+
+        monitor.appendChild(
+            transcriptBox
+        );
+    }
+
+
+    const finalText =
+        String(
+            liveProviderTranscript || liveTranscriptFinal || ""
+        ).trim();
+
+    const interimText =
+        liveProviderTranscript
+            ? ""
+            : String(liveTranscriptInterim || "").trim();
+
+
+    /*
+     * Nothing spoken yet.
+     */
+
+    if (
+        !finalText &&
+        !interimText
+    ) {
+
+        transcriptBox.innerHTML =
+            `
+            <div style="
+                font-size:9px;
+                letter-spacing:0.12em;
+                opacity:0.5;
+                margin-bottom:4px;
+            ">
+                LIVE TRANSCRIPT
+            </div>
+
+            <div style="
+                opacity:0.45;
+            ">
+                Listening for speech...
+            </div>
+            `;
+
+        return;
+    }
+
+
+    /*
+     * Final speech is normal.
+     * Interim speech is slightly faded.
+     */
+
+    transcriptBox.innerHTML =
+        `
+        <div style="
+            font-size:9px;
+            letter-spacing:0.12em;
+            opacity:0.5;
+            margin-bottom:4px;
+        ">
+            LIVE TRANSCRIPT
+        </div>
+
+        <div>
+            ${escapeHtml(finalText)}
+
+            <span style="
+                opacity:0.45;
+            ">
+                ${escapeHtml(interimText)}
+            </span>
+        </div>
+        `;
+}
+
+function appendProviderTranscript(transcription) {
+    const text = String(
+        transcription?.transcript || ""
+    ).trim();
+
+    if (!text) {
+        return;
+    }
+
+    liveTranscriptProvider =
+        transcription.provider || liveTranscriptProvider;
+    liveProviderTranscript =
+        `${liveProviderTranscript} ${text}`.trim();
+    updateLiveTranscriptDisplay();
+}
+
+
+function updateLiveTranscriptStatus(
+    message
+) {
+
+    const transcriptBox =
+        document.getElementById(
+            "vs-live-transcript"
+        );
+
+    if (!transcriptBox) {
+        return;
+    }
+
+    const status =
+        document.createElement(
+            "div"
+        );
+
+    status.style.marginTop =
+        "5px";
+
+    status.style.fontSize =
+        "9px";
+
+    status.style.opacity =
+        "0.45";
+
+    status.textContent =
+        message;
+
+    transcriptBox.appendChild(
+        status
+    );
+
+}
+/* ============================================================
+   FINAL SECURITY REASON
+   ============================================================ */
+
+function updateLiveFinalReason(
+    verdict,
+    reasons
+) {
+
+    const monitor =
+        document.querySelector(
+            ".vs-live-monitor"
+        );
+
+    if (!monitor) {
+        return;
+    }
+
+    let reasonBox =
+        document.getElementById(
+            "vs-live-final-reason"
+        );
+
+    /*
+     * Create once.
+     */
+
+    if (!reasonBox) {
+
+        reasonBox =
+            document.createElement(
+                "div"
+            );
+
+        reasonBox.id =
+            "vs-live-final-reason";
+
+        reasonBox.style.marginTop =
+            "14px";
+
+        reasonBox.style.padding =
+            "12px 14px";
+
+        reasonBox.style.borderRadius =
+            "12px";
+
+        reasonBox.style.background =
+            "rgba(255,255,255,0.025)";
+
+        reasonBox.style.border =
+            "1px solid rgba(255,255,255,0.07)";
+
+        monitor.appendChild(
+            reasonBox
+        );
+
+    }
+
+
+    const safe =
+        verdict === "SAFE";
+
+
+    reasonBox.innerHTML = `
+        <div style="
+            font-size:9px;
+            letter-spacing:0.14em;
+            opacity:0.5;
+            margin-bottom:6px;
+        ">
+            FINAL SECURITY ASSESSMENT
+        </div>
+
+        <div style="
+            font-size:13px;
+            font-weight:700;
+            margin-bottom:7px;
+        ">
+            ${safe ? "✓ SAFE" : "⚠ UNSAFE"}
+        </div>
+
+        <div style="
+            font-size:11px;
+            line-height:1.7;
+            opacity:0.72;
+        ">
+            ${reasons
+                .map(
+                    reason =>
+                        `<div>• ${escapeHtml(reason)}</div>`
+                )
+                .join("")}
+        </div>
+    `;
+
+}
 let liveChunkIndex = 0;
+let liveDisplayedChunkCount = 0;
 let liveCallStartedAt = null;
 let liveCallTimer = null;
 let liveProcessing = false;
 let liveChunksProcessed = 0;
 let liveRiskHistory = [];
+let livePendingAnalyses = 0;
+let liveStableNotificationSent = false;
+let liveNotificationSource = null;
+let liveDecisionMade = false;
 
+/* ============================================================
+   LIVE RESULT STABILITY ENGINE
+   Prevents one noisy/misclassified chunk from
+   immediately declaring the entire call FAKE.
+============================================================ */
+
+let livePredictionHistory = [];
+
+/*
+ * ============================================================
+ * LIVE RESULT STABILITY
+ *
+ * A single chunk NEVER decides the call.
+ *
+ * Four consecutive strong results are required before
+ * VoiceShield changes the final security state.
+ * ============================================================
+ */
+
+const LIVE_STABILITY_WINDOW = 4;
+const LIVE_FAKE_THRESHOLD = 0.85;
+const LIVE_STABLE_REQUIRED = 4;
+
+let liveStablePrediction = "unknown";
+let liveStableFakeScore = 0;
+let liveStableRiskScore = 0;
 function updateLiveListeningState(listening = true) {
 
     const indicator =
@@ -1883,6 +2392,74 @@ function updateLiveProcessingState(processing = true) {
         "processing",
         processing
     );
+    if (processing) {
+
+    showLiveSecurityAnalyzing();
+
+}
+}
+/* ============================================================
+   LIVE SECURITY ANALYSIS STATE
+   ------------------------------------------------------------
+   Keeps the main security status neutral while the
+   live detector is still collecting evidence.
+   The REAL/FAKE decision is shown only after stability.
+============================================================ */
+
+function showLiveSecurityAnalyzing() {
+
+    /*
+     * Never show a fake/real final verdict while
+     * the stability engine is still collecting chunks.
+     */
+
+    document.body.classList.remove(
+        "security-danger",
+        "security-success",
+        "security-warning"
+    );
+
+    if (resultTag) {
+        resultTag.textContent =
+            "LIVE • ANALYZING";
+    }
+
+    if (predictionBadge) {
+
+        predictionBadge.innerHTML =
+            `
+            <span class="live-analysis-spinner"
+                  aria-hidden="true"></span>
+            ANALYZING VOICE
+            `;
+
+        predictionBadge.className =
+            "prediction-badge live";
+    }
+
+    if (predictionText) {
+
+        predictionText.textContent =
+            "Analyzing live call";
+    }
+
+    if (predictionDescription) {
+
+        predictionDescription.textContent =
+            "VoiceShield is collecting multiple voice segments before making a security decision.";
+    }
+
+    if (riskLevel) {
+
+        riskLevel.textContent =
+            "ANALYZING";
+    }
+
+    if (riskAction) {
+
+        riskAction.textContent =
+            "MONITOR";
+    }
 }
 
 function updateLiveSecurityStatus(active) {
@@ -1897,23 +2474,7 @@ function updateLiveSecurityStatus(active) {
             resultState.classList.remove("hidden");
         }
 
-        if (resultTag) {
-            resultTag.textContent = "LIVE";
-        }
-
-        if (predictionBadge) {
-            predictionBadge.textContent = "LIVE MONITORING";
-            predictionBadge.className = "prediction-badge live";
-        }
-
-        if (predictionText) {
-            predictionText.textContent = "Listening for live voice";
-        }
-
-        if (predictionDescription) {
-            predictionDescription.textContent =
-                "Microphone active. Voice analysis is updating every few seconds.";
-        }
+        showLiveSecurityAnalyzing();
 
         return;
     }
@@ -2061,6 +2622,37 @@ async function startLiveCall() {
                 }
             });
             startLiveVisualizer(liveMediaStream);
+            /*
+ * Start browser transcription independently
+ * from the deepfake detection pipeline.
+ */
+
+liveTranscriptFinal = "";
+liveTranscriptInterim = "";
+
+initializeLiveTranscription();
+
+if (
+    liveSpeechRecognition &&
+    liveSpeechSupported
+) {
+
+    try {
+
+        liveSpeechRecognition.start();
+
+    } catch (error) {
+
+        console.warn(
+            "Live transcription could not start:",
+            error
+        );
+
+    }
+
+}
+
+updateLiveTranscriptDisplay();
         liveSocket =
             new WebSocket(
                 "ws://127.0.0.1:8000/ws/live-call"
@@ -2350,20 +2942,6 @@ function updateLiveDashboard(
 
     }
 
-
-    /*
-     * Reuse your existing risk system.
-     */
-
-    if (risk.level) {
-
-        applyRiskStyle(
-            risk.level
-        );
-
-    }
-
-
     addLiveTimelineEvent(
         chunkIndex,
         prediction,
@@ -2371,23 +2949,6 @@ function updateLiveDashboard(
         score,
         action
     );
-
-
-    /*
-     * IMPORTANT:
-     * A live fake detection immediately
-     * switches the global security theme.
-     */
-
-    if (
-        prediction === "FAKE"
-    ) {
-
-        document.body.classList.add(
-            "security-danger"
-        );
-
-    }
 
 }
 
@@ -2725,6 +3286,14 @@ async function simulateLiveCall(file) {
         return;
     }
 
+    livePredictionHistory = [];
+    liveStablePrediction = "unknown";
+    liveStableFakeScore = 0;
+    liveStableRiskScore = 0;
+    liveStableNotificationSent = false;
+    liveNotificationSource = `simulation-call:${Date.now()}`;
+    liveDecisionMade = false;
+
     setLoadingState(true);
 
     setLiveCallStatus(
@@ -2910,6 +3479,8 @@ async function simulateLiveCall(file) {
 
         }
 
+        finalizeLiveSecurityDecision();
+
 
     } catch (error) {
 
@@ -3004,6 +3575,50 @@ async function startRealTimeMicrophone() {
 
         liveChunksProcessed = 0;
         liveRiskHistory = [];
+        livePredictionHistory = [];
+        liveStablePrediction = "unknown";
+        liveStableFakeScore = 0;
+        liveStableRiskScore = 0;
+        liveStableNotificationSent = false;
+        liveNotificationSource = `microphone-call:${Date.now()}`;
+        liveDecisionMade = false;
+
+        /*
+        * ============================================================
+        * RESET SECURITY UI
+        *
+        * Every new call starts in a neutral/analyzing state.
+        * Previous call results must not carry over.
+        * ============================================================
+        */
+
+        showLiveSecurityAnalyzing();
+        /*
+        * Clear previous final security explanation.
+        */
+
+        const previousFinalReason =
+            document.getElementById(
+                "vs-live-final-reason"
+            );
+
+        if (previousFinalReason) {
+
+            previousFinalReason.remove();
+
+        }
+
+
+        /*
+        * Reset transcript.
+        */
+
+        liveTranscriptFinal = "";
+        liveTranscriptInterim = "";
+        liveProviderTranscript = "";
+        liveTranscriptProvider = null;
+
+        updateLiveTranscriptDisplay();
         updateLiveListeningState(true);
         updateLiveProcessingState(false);
 
@@ -3012,9 +3627,42 @@ async function startRealTimeMicrophone() {
         );
 
         liveCallActive = true;
+        /*
+        * Start browser speech recognition.
+        *
+        * This is independent from deepfake detection.
+        * If transcription fails, voice security detection
+        * continues normally.
+        */
+
+        initializeLiveTranscription();
+
+        if (
+            liveSpeechRecognition &&
+            liveSpeechSupported
+        ) {
+
+            try {
+
+                liveSpeechRecognition.start();
+
+                console.log(
+                    "LIVE TRANSCRIPTION STARTED"
+                );
+
+            } catch (error) {
+
+                console.warn(
+                    "Live transcription start skipped:",
+                    error
+                );
+
+            }
+
+        }
         liveCallStartedAt = Date.now();
         liveChunkIndex = 0;
-
+        liveDisplayedChunkCount = 0;
         updateLiveCallUI(true);
 
         /*
@@ -3033,10 +3681,6 @@ async function startRealTimeMicrophone() {
             async (event) => {
 
                 if (!event.data || event.data.size === 0) {
-                    return;
-                }
-
-                if (!liveCallActive) {
                     return;
                 }
 
@@ -3211,10 +3855,6 @@ function restartLiveRecorder() {
                 return;
             }
 
-            if (!liveCallActive) {
-                return;
-            }
-
             console.log(
                 "Processing live chunk:",
                 liveChunkIndex
@@ -3243,6 +3883,7 @@ async function processLiveChunk(
     chunkIndex
 ) {
 
+    livePendingAnalyses++;
     liveProcessing = true;
     updateLiveProcessingState(true);
 
@@ -3250,12 +3891,6 @@ async function processLiveChunk(
         window.voiceShieldLiveMonitor.processing(
             chunkIndex
         );
-    }
-
-    if (!liveCallActive) {
-        liveProcessing = false;
-        updateLiveProcessingState(false);
-        return;
     }
 
     const extension =
@@ -3333,6 +3968,10 @@ async function processLiveChunk(
         const data =
             await response.json();
 
+        appendProviderTranscript(
+            data.transcription
+        );
+
         console.log(
             "LIVE BACKEND RESULT:",
             data
@@ -3360,14 +3999,15 @@ async function processLiveChunk(
             Array.isArray(data.events)
         ) {
 
-            data.events.forEach(
-                handleLiveAnalysisEvent
+            data.events.forEach((event) =>
+                handleLiveAnalysisEvent({
+                    ...event,
+                    live_chunk_index: chunkIndex
+                })
             );
         }
 
-        liveProcessing = false;
         liveChunksProcessed++;
-        updateLiveProcessingState(false);
 
     } catch (error) {
 
@@ -3385,8 +4025,21 @@ async function processLiveChunk(
                 `ANALYSIS ERROR: ${error.message}`;
         }
 
-        liveProcessing = false;
-        updateLiveProcessingState(false);
+    } finally {
+        livePendingAnalyses = Math.max(
+            livePendingAnalyses - 1,
+            0
+        );
+        liveProcessing = livePendingAnalyses > 0;
+
+        if (liveProcessing || liveCallActive) {
+            updateLiveProcessingState(liveProcessing);
+        } else if (
+            livePendingAnalyses === 0 &&
+            !liveDecisionMade
+        ) {
+            finalizeLiveSecurityDecision();
+        }
     }
 }
 function handleLiveAnalysisEvent(event) {
@@ -3408,7 +4061,7 @@ function handleLiveAnalysisEvent(event) {
 
         if (processingStatus) {
             processingStatus.textContent =
-                `Live analysis complete - chunk ${Number(event.chunk_index || 0) + 1}`;
+                `Live analysis complete - chunk ${Number(event.live_chunk_index || 0) + 1}`;
         }
 
         renderLiveChunkResult(
@@ -3417,7 +4070,7 @@ function handleLiveAnalysisEvent(event) {
 
         if (window.voiceShieldLiveMonitor) {
             window.voiceShieldLiveMonitor.analyzed(
-                event.chunk_index
+                event.live_chunk_index
             );
         }
 
@@ -3437,82 +4090,194 @@ function handleLiveAnalysisEvent(event) {
     }
 }
 
-function renderLiveChunkResult(event) {
+function finalizeLiveSecurityDecision() {
 
-    /*
-     * Reuse the existing realtime timeline.
-     */
-
-    if (chunkTimeline) {
-
-        if (chunkTimelineCard) {
-            chunkTimelineCard.classList.remove("hidden");
-        }
-
-        const element =
-            document.createElement("div");
-
-        const fake =
-            String(
-                event.prediction || ""
-            ).toLowerCase() === "fake";
-
-        element.className =
-            fake
-                ? "chunk fake"
-                : "chunk";
-
-        element.innerHTML = `
-            <div class="chunk-index">
-                LIVE ${String(
-                    event.chunk_index + 1
-                ).padStart(2, "0")}
-            </div>
-
-            <div class="chunk-prediction">
-                ${String(
-                    event.prediction || "UNKNOWN"
-                ).toUpperCase()}
-            </div>
-
-            <div class="chunk-score">
-                ${(
-                    Number(
-                        event.confidence || 0
-                    ) * 100
-                ).toFixed(2)}% confidence
-            </div>
-        `;
-
-        chunkTimeline.appendChild(
-            element
-        );
+    if (livePredictionHistory.length === 0) {
+        return;
     }
 
-    updateLiveDashboard(
-        {
-            voice_detection: {
-                prediction: event.prediction,
-                fake_score: event.fake_score
-            },
-            risk: {
-                score: event.risk_score,
-                action: event.action,
-                level: event.risk_level
-            }
-        },
-        event.chunk_index
-    );
+    const completionLabel =
+        String(liveNotificationSource || "").startsWith("simulation-call:")
+            ? "TEST COMPLETED"
+            : "CALL COMPLETED";
 
-    /*
-     * Update the main threat display immediately.
-     */
+    if (liveDecisionMade) {
+        showLiveCompletionSummary(
+            liveStablePrediction,
+            {
+                stable: true,
+                prediction: liveStablePrediction,
+                fakeScore: liveStableFakeScore,
+                riskScore: liveStableRiskScore,
+                evidenceCount: livePredictionHistory.length,
+                requiredCount: LIVE_STABLE_REQUIRED
+            },
+            completionLabel
+        );
+        return;
+    }
+
+    const observations = livePredictionHistory;
+    const fakeCount = observations.filter(
+        item => item.prediction === "fake"
+    ).length;
+    const averageFakeScore = observations.reduce(
+        (sum, item) => sum + item.fakeScore,
+        0
+    ) / observations.length;
+    const averageRiskScore = observations.reduce(
+        (sum, item) => sum + item.riskScore,
+        0
+    ) / observations.length;
+    const realCount = observations.filter(
+        item => item.prediction === "real"
+    ).length;
+    const prediction = fakeCount > observations.length / 2
+        ? "fake"
+        : realCount > observations.length / 2
+            ? "real"
+            : "suspicious";
+
+    const stableResult = {
+        stable: true,
+        prediction,
+        fakeScore: averageFakeScore,
+        riskScore: prediction === "fake"
+            ? Math.max(averageRiskScore, averageFakeScore * 100)
+            : averageRiskScore,
+        evidenceCount: observations.length,
+        requiredCount: LIVE_STABLE_REQUIRED
+    };
 
     updateLiveThreatDisplay(
-        event
+        {
+            prediction,
+            fake_score: averageFakeScore,
+            risk_score: stableResult.riskScore,
+            stable: true
+        },
+        stableResult
     );
+
+    showLiveCompletionSummary(
+        prediction,
+        stableResult,
+        completionLabel
+    );
+
+    if (liveCallStatus) {
+        liveCallStatus.textContent = "CALL ANALYSIS COMPLETE";
+    }
 }
-function updateLiveThreatDisplay(event) {
+
+function showLiveCompletionSummary(
+    prediction,
+    stableResult,
+    label = "CALL COMPLETED"
+) {
+
+    const normalizedPrediction =
+        String(prediction || "unknown").toLowerCase();
+
+    const isFake = normalizedPrediction === "fake";
+    const isReal = normalizedPrediction === "real";
+    const verdict = isFake
+        ? "FAKE VOICE"
+        : isReal
+            ? "REAL VOICE"
+            : "SUSPICIOUS VOICE";
+    const action = isFake
+        ? "BLOCK"
+        : isReal
+            ? "ALLOW"
+            : "MONITOR";
+    const badge = isFake
+        ? "[!] COMPLETED SYNTHETIC VOICE DETECTED"
+        : isReal
+            ? "[OK] COMPLETED AUTHENTIC VOICE VERIFIED"
+            : "[*] COMPLETED INCONCLUSIVE / SUSPICIOUS PATTERN";
+    const title = isFake
+        ? "Synthetic Voice Detected"
+        : isReal
+            ? "Authentic Voice Confirmed"
+            : "Suspicious Audio Detected";
+    const description = isFake
+        ? "Multiple voice segments generated strong deepfake evidence. Recommended Action: Block call immediately."
+        : isReal
+            ? "Voice traits match expected human baseline. It is safe to proceed with this call."
+            : "Inconsistent audio signals detected. Exercise caution before proceeding.";
+
+    const processingStatus =
+        document.getElementById("live-processing-status");
+
+    if (processingStatus) {
+        processingStatus.textContent =
+            `${label} - ${verdict} - ${action}`;
+        processingStatus.classList.remove("processing");
+    }
+
+    if (resultTag) {
+        resultTag.textContent = "LIVE • COMPLETE";
+    }
+
+    document.body.classList.remove(
+        "security-danger",
+        "security-success",
+        "security-warning"
+    );
+    document.body.classList.add(
+        isFake
+            ? "security-danger"
+            : isReal
+                ? "security-success"
+                : "security-warning"
+    );
+
+    if (predictionBadge) {
+        predictionBadge.textContent = badge;
+    }
+
+    if (predictionText) {
+        predictionText.textContent = title;
+    }
+
+    if (predictionDescription) {
+        predictionDescription.textContent = description;
+    }
+
+    if (riskLevel) {
+        riskLevel.textContent = isFake
+            ? "HIGH RISK"
+            : isReal
+                ? "LOW RISK"
+                : "MEDIUM RISK";
+    }
+
+    if (riskAction) {
+        riskAction.textContent = action;
+    }
+
+    applyRiskStyle(isFake ? "HIGH" : isReal ? "LOW" : "MEDIUM");
+
+    updateLiveEvidenceDisplay({
+        ...stableResult,
+        stable: true,
+        completionLabel: label
+    });
+}
+/* ============================================================
+   LIVE PREDICTION STABILITY
+============================================================ */
+
+/* ============================================================
+   FINAL LIVE DECISION ENGINE
+   ------------------------------------------------------------
+   Individual chunks NEVER change the final security state.
+
+   Four consecutive strong results are required.
+   ============================================================ */
+
+function calculateStableLiveResult(event) {
 
     const prediction =
         String(
@@ -3529,75 +4294,962 @@ function updateLiveThreatDisplay(event) {
             event.risk_score || 0
         );
 
-    recordLiveRisk(
+    /*
+     * Store this chunk.
+     */
+    livePredictionHistory.push({
+        prediction,
+        fakeScore,
         riskScore
-    );
+    });
 
     /*
-     * Voice authenticity
+     * Keep only the latest stability window.
      */
+    if (
+        livePredictionHistory.length >
+        LIVE_STABILITY_WINDOW
+    ) {
 
-    if (voiceResult) {
+        livePredictionHistory.shift();
 
-        voiceResult.textContent =
-            prediction.toUpperCase();
-    }
-
-    if (fakeScore) {
-
-        fakeScore.textContent =
-            `${(
-                fakeScore * 100
-            ).toFixed(2)}%`;
-    }
-
-    if (fakeScoreBar) {
-
-        fakeScoreBar.style.width =
-            `${fakeScore * 100}%`;
     }
 
     /*
-     * Risk
+     * Not enough evidence yet.
      */
+    if (
+        livePredictionHistory.length <
+        LIVE_STABILITY_WINDOW
+    ) {
 
-    if (riskScore !== undefined) {
+        return {
+            stable: false,
+            prediction: "verifying",
+            fakeScore,
+            riskScore,
+            evidenceCount:
+                livePredictionHistory.length,
+            requiredCount:
+                LIVE_STABILITY_WINDOW
+        };
 
-        if (riskScoreElementExists()) {
+    }
 
-            riskScoreElement.textContent =
-                Math.round(riskScore);
+    const recent =
+        livePredictionHistory;
+
+    /*
+     * Count strong FAKE results.
+     */
+    const fakeCount =
+        recent.filter(
+            item =>
+                item.prediction === "fake" &&
+                item.fakeScore >=
+                    LIVE_FAKE_THRESHOLD
+        ).length;
+
+    /*
+     * Count REAL results.
+     */
+    const realCount =
+        recent.filter(
+            item =>
+                item.prediction === "real"
+        ).length;
+
+    /*
+     * Average fake probability.
+     */
+    const averageFakeScore =
+        recent.reduce(
+            (sum, item) =>
+                sum + item.fakeScore,
+            0
+        ) / recent.length;
+
+    /*
+     * Average risk.
+     */
+    const averageRiskScore =
+        recent.reduce(
+            (sum, item) =>
+                sum + item.riskScore,
+            0
+        ) / recent.length;
+
+
+    /* ========================================================
+       STABLE FAKE
+       ======================================================== */
+
+    if (
+        fakeCount >=
+        LIVE_STABLE_REQUIRED
+    ) {
+
+        liveStablePrediction =
+            "fake";
+
+        liveStableFakeScore =
+            averageFakeScore;
+
+        liveStableRiskScore =
+            Math.max(
+                averageRiskScore,
+                averageFakeScore * 100
+            );
+
+        return {
+
+            stable: true,
+
+            prediction: "fake",
+
+            fakeScore:
+                averageFakeScore,
+
+            riskScore:
+                liveStableRiskScore,
+
+            evidenceCount:
+                fakeCount,
+
+            requiredCount:
+                LIVE_STABLE_REQUIRED
+
+        };
+
+    }
+
+
+    /* ========================================================
+       STABLE REAL
+       ======================================================== */
+
+    if (
+        realCount >=
+        LIVE_STABLE_REQUIRED
+    ) {
+
+        liveStablePrediction =
+            "real";
+
+        liveStableFakeScore =
+            averageFakeScore;
+
+        liveStableRiskScore =
+            averageRiskScore;
+
+        return {
+
+            stable: true,
+
+            prediction: "real",
+
+            fakeScore:
+                averageFakeScore,
+
+            riskScore:
+                averageRiskScore,
+
+            evidenceCount:
+                realCount,
+
+            requiredCount:
+                LIVE_STABLE_REQUIRED
+
+        };
+
+    }
+
+
+    /* ========================================================
+       INCONSISTENT
+       ======================================================== */
+
+    return {
+
+        stable: false,
+
+        prediction: "verifying",
+
+        fakeScore:
+            averageFakeScore,
+
+        riskScore:
+            averageRiskScore,
+
+        evidenceCount:
+            livePredictionHistory.length,
+
+        requiredCount:
+            LIVE_STABILITY_WINDOW
+
+    };
+
+}
+
+function renderLiveChunkResult(event) {
+    /*
+     * Frontend-owned chunk number.
+     *
+     * The backend analyzes each uploaded microphone
+     * chunk as an independent request and therefore
+     * may return chunk_index = 0 every time.
+     *
+     * We keep the real live-call sequence here.
+     */
+    liveDisplayedChunkCount++;
+
+    const displayChunkIndex =
+        Number.isFinite(Number(event.live_chunk_index))
+            ? Number(event.live_chunk_index)
+            : liveDisplayedChunkCount - 1;
+
+    /*
+     * Reuse the existing realtime timeline.
+     */
+    if (chunkTimeline) {
+
+        if (chunkTimelineCard) {
+            chunkTimelineCard.classList.remove("hidden");
+        }
+
+        const element = document.createElement("div");
+
+        const fake = String(event.prediction || "").toLowerCase() === "fake";
+
+        element.className = fake ? "chunk fake" : "chunk";
+
+        element.innerHTML = `
+            <div class="chunk-index">
+                LIVE ${String(displayChunkIndex + 1).padStart(2, "0")}
+            </div>
+
+            <div class="chunk-prediction">
+                ${String(event.prediction || "UNKNOWN").toUpperCase()}
+            </div>
+
+            <div class="chunk-score">
+                ${(Number(event.confidence || 0) * 100).toFixed(2)}% confidence
+            </div>
+        `;
+
+        chunkTimeline.appendChild(element);
+    }
+
+    /*
+     * ------------------------------------------------------------
+     * STABILIZE LIVE RESULT BEFORE UPDATING
+     * THE MAIN SECURITY DECISION.
+     * ------------------------------------------------------------
+     */
+    const stableResult = calculateStableLiveResult(event);
+
+    /*
+     * ============================================================
+     * FINAL STABLE SECURITY DECISION
+     *
+     * IMPORTANT:
+     * Do NOT change the UI colour based on individual chunks.
+     * The colour changes only after the stable result is confirmed.
+     * ============================================================
+     */
+    if (stableResult && stableResult.stable === true) {
+
+        if (String(stableResult.prediction).toLowerCase() === "fake") {
+
+            /*
+             * ============================================================
+             * FINAL FAKE CONCLUSION
+             * ============================================================
+             */
+            if (predictionBadge) {
+                predictionBadge.textContent = "⚠ FAKE VOICE DETECTED";
+            }
+
+            if (predictionText) {
+                predictionText.textContent = "Synthetic voice detected";
+            }
+
+            if (predictionDescription) {
+                predictionDescription.textContent =
+                    "Multiple consecutive voice segments produced strong synthetic-voice evidence. The call should be blocked.";
+            }
+
+            if (riskLevel) {
+                riskLevel.textContent = "HIGH RISK";
+            }
+
+            if (riskAction) {
+                riskAction.textContent = "BLOCK";
+            }
+
+            document.body.classList.add("security-danger");
+
+        } else if (String(stableResult.prediction).toLowerCase() === "real") {
+
+            /*
+             * ============================================================
+             * FINAL REAL CONCLUSION
+             * ============================================================
+             */
+            if (predictionBadge) {
+                predictionBadge.textContent = "✓ REAL VOICE VERIFIED";
+            }
+
+            if (predictionText) {
+                predictionText.textContent = "Authentic voice detected";
+            }
+
+            if (predictionDescription) {
+                predictionDescription.textContent =
+                    "Multiple consecutive voice segments remained consistent with an authentic voice. The call can be allowed.";
+            }
+
+            if (riskLevel) {
+                riskLevel.textContent = "LOW RISK";
+            }
+
+            if (riskAction) {
+                riskAction.textContent = "ALLOW";
+            }
+
+            document.body.classList.remove("security-danger");
+        }
+
+    } else {
+
+        /*
+         * ========================================================
+         * STILL VERIFYING
+         *
+         * Individual chunks are NOT allowed to turn the
+         * interface red or green.
+         * ========================================================
+         */
+        document.body.classList.remove("security-danger");
+
+        if (riskAction) {
+            riskAction.textContent = "MONITOR";
+        }
+
+        if (riskLevel) {
+            riskLevel.textContent = "ANALYZING";
         }
     }
 
     /*
-     * REAL → normal
-     * FAKE → danger
+     * Always show the individual chunk
+     * in the timeline.
+     */
+    updateLiveDashboard(
+        {
+            voice_detection: {
+                prediction: event.prediction,
+                fake_score: event.fake_score
+            },
+            risk: {
+                score: event.risk_score,
+                action: event.action,
+                level: event.risk_level
+            }
+        },
+        event.live_chunk_index
+    );
+
+    /*
+     * Main dashboard only changes after
+     * enough evidence has accumulated.
+     */
+    updateLiveThreatDisplay({
+        ...event,
+        prediction: stableResult ? stableResult.prediction : event.prediction,
+        fake_score: stableResult ? stableResult.fakeScore : event.fake_score,
+        risk_score: stableResult ? stableResult.riskScore : event.risk_score,
+        stable: stableResult ? stableResult.stable : false
+    }, stableResult);
+}
+
+function updateLiveThreatDisplay(event, stableResult) {
+
+    const rawPrediction =
+        String(
+            event.prediction || "unknown"
+        ).toLowerCase();
+
+    const rawFakeScore =
+        Number(
+            event.fake_score || 0
+        );
+
+    const rawRiskScore =
+        Number(
+            event.risk_score || 0
+        );
+
+
+    /*
+     * ========================================================
+     * CALCULATE FINAL STABLE RESULT
+     * ========================================================
      */
 
-    if (prediction === "fake") {
+    /*
+     * Keep risk history for the small trend indicator.
+     *
+     * This does NOT control the global security colour.
+     */
+
+    recordLiveRisk(
+        rawRiskScore
+    );
+
+
+    /* ========================================================
+       VERIFYING
+       ======================================================== */
+
+    if (!stableResult.stable) {
+
+        /*
+         * VERY IMPORTANT:
+         * Do not show FAKE as the final result yet.
+         */
+
+        if (voiceResult) {
+
+            voiceResult.textContent =
+                "VERIFYING";
+
+        }
+
+        if (fakeScore) {
+
+            fakeScore.textContent =
+                `${(
+                    rawFakeScore * 100
+                ).toFixed(2)}%`;
+
+        }
+
+        if (fakeScoreBar) {
+
+            fakeScoreBar.style.width =
+                `${Math.min(
+                    rawFakeScore * 100,
+                    100
+                )}%`;
+
+        }
+
+
+        /*
+         * Keep entire application neutral.
+         */
+
+        document.body.classList.remove(
+            "security-danger"
+        );
+
+
+        if (predictionBadge) {
+
+            predictionBadge.innerHTML =
+                `<span class="live-analysis-spinner" aria-hidden="true"></span>` +
+                `ANALYZING • ${stableResult.evidenceCount}/${stableResult.requiredCount}`;
+
+            predictionBadge.className =
+                "prediction-badge live";
+
+        }
+
+
+        if (predictionText) {
+
+            predictionText.textContent =
+                "Analyzing voice consistency";
+
+        }
+
+
+        if (predictionDescription) {
+
+            predictionDescription.textContent =
+                `VoiceShield is comparing consecutive voice segments. ` +
+                `${stableResult.evidenceCount}/` +
+                `${stableResult.requiredCount} ` +
+                `stable observations collected.`;
+
+        }
+
+
+        if (riskLevel) {
+
+            riskLevel.textContent =
+                "VERIFYING";
+
+        }
+
+
+        if (riskAction) {
+
+            riskAction.textContent =
+                "MONITOR";
+
+        }
+
+
+        /*
+         * Show the evidence counter in the live monitor.
+         */
+
+        updateLiveEvidenceDisplay(
+            stableResult
+        );
+
+        return;
+
+    }
+
+
+    /* ========================================================
+       STABLE FINAL RESULT
+       ======================================================== */
+
+    const finalPrediction =
+        stableResult.prediction;
+
+    const finalFakeScore =
+        stableResult.fakeScore;
+
+    const finalRiskScore =
+        stableResult.riskScore;
+
+
+    /*
+     * ========================================================
+     * STABLE FAKE
+     * ========================================================
+     */
+
+    if (
+        finalPrediction === "fake"
+    ) {
+
+        /*
+         * NOW — and only now — turn the application red.
+         */
 
         document.body.classList.add(
             "security-danger"
         );
 
-    } else {
+
+        if (voiceResult) {
+
+            voiceResult.textContent =
+                "FAKE — CONFIRMED";
+
+        }
+
+
+        if (fakeScore) {
+
+            fakeScore.textContent =
+                `${(
+                    finalFakeScore * 100
+                ).toFixed(2)}%`;
+
+        }
+
+
+        if (fakeScoreBar) {
+
+            fakeScoreBar.style.width =
+                `${Math.min(
+                    finalFakeScore * 100,
+                    100
+                )}%`;
+
+        }
+
+
+        if (predictionBadge) {
+
+            predictionBadge.textContent =
+                "SYNTHETIC VOICE CONFIRMED";
+
+            predictionBadge.style.color =
+                "var(--danger)";
+
+            predictionBadge.style.borderColor =
+                "rgba(255,84,112,0.35)";
+
+            predictionBadge.style.background =
+                "var(--danger-soft)";
+
+        }
+
+
+        if (predictionText) {
+
+            predictionText.textContent =
+                "Stable AI-generated voice detected";
+
+        }
+
+
+        if (predictionDescription) {
+
+            predictionDescription.textContent =
+                `HIGH RISK — ${(
+                    finalFakeScore * 100
+                ).toFixed(1)}% average synthetic-voice probability ` +
+                `across ${LIVE_STABLE_REQUIRED} consecutive observations. ` +
+                `VoiceShield recommends BLOCK.`;
+
+        }
+
+
+        if (riskScore) {
+
+            riskScore.textContent =
+                Math.round(
+                    finalRiskScore
+                );
+
+        }
+
+
+        if (riskLevel) {
+
+            riskLevel.textContent =
+                "HIGH RISK";
+
+        }
+
+
+        if (riskAction) {
+
+            riskAction.textContent =
+                "BLOCK";
+
+        }
+
+
+        /*
+         * Apply final risk styling ONLY here.
+         */
+
+        applyRiskStyle(
+            "HIGH"
+        );
+
+        if (resultTag) {
+            resultTag.textContent = "LIVE • FINAL";
+        }
+
+        liveDecisionMade = true;
+
+        publishStableLiveNotification(
+            stableResult,
+            "HIGH",
+            "BLOCK"
+        );
+
+
+        updateLiveFinalReason(
+            "UNSAFE",
+            [
+                "Multiple consecutive voice segments were classified as synthetic.",
+                `Average fake probability: ${(
+                    finalFakeScore * 100
+                ).toFixed(1)}%.`,
+                `The result remained consistent across ${LIVE_STABLE_REQUIRED} observations.`,
+                "Recommended action: BLOCK the call."
+            ]
+        );
+
+
+        updateLiveEvidenceDisplay(
+            stableResult
+        );
+
+        return;
+
+    }
+
+
+    /*
+     * ========================================================
+     * STABLE REAL
+     * ========================================================
+     */
+
+    if (
+        finalPrediction === "real"
+    ) {
+
+        /*
+         * Explicitly make sure the previous danger state
+         * is removed only after a STABLE REAL decision.
+         */
 
         document.body.classList.remove(
             "security-danger"
         );
+
+
+        if (voiceResult) {
+
+            voiceResult.textContent =
+                "REAL — VERIFIED";
+
+        }
+
+
+        if (fakeScore) {
+
+            fakeScore.textContent =
+                `${(
+                    finalFakeScore * 100
+                ).toFixed(2)}%`;
+
+        }
+
+
+        if (fakeScoreBar) {
+
+            fakeScoreBar.style.width =
+                `${Math.min(
+                    finalFakeScore * 100,
+                    100
+                )}%`;
+
+        }
+
+
+        if (predictionBadge) {
+
+            predictionBadge.textContent =
+                "VOICE VERIFIED";
+
+            predictionBadge.style.color =
+                "var(--neon)";
+
+            predictionBadge.style.borderColor =
+                "var(--border-bright)";
+
+            predictionBadge.style.background =
+                "var(--neon-soft)";
+
+        }
+
+
+        if (predictionText) {
+
+            predictionText.textContent =
+                "Authentic voice detected";
+
+        }
+
+
+        if (predictionDescription) {
+
+            predictionDescription.textContent =
+                `LOW RISK — voice remained consistent across ` +
+                `${LIVE_STABLE_REQUIRED} consecutive observations.`;
+
+        }
+
+
+        if (riskScore) {
+
+            riskScore.textContent =
+                Math.round(
+                    finalRiskScore
+                );
+
+        }
+
+
+        if (riskLevel) {
+
+            riskLevel.textContent =
+                "LOW RISK";
+
+        }
+
+
+        if (riskAction) {
+
+            riskAction.textContent =
+                "ALLOW";
+
+        }
+
+
+        /*
+         * Apply GREEN/SAFE styling only after
+         * stable REAL is confirmed.
+         */
+
+        applyRiskStyle(
+            "LOW"
+        );
+
+        if (resultTag) {
+            resultTag.textContent = "LIVE • FINAL";
+        }
+
+        liveDecisionMade = true;
+
+        publishStableLiveNotification(
+            stableResult,
+            "LOW",
+            "ALLOW"
+        );
+
+
+        updateLiveFinalReason(
+            "SAFE",
+            [
+                "No persistent synthetic-voice pattern was detected.",
+                `Average fake probability: ${(
+                    finalFakeScore * 100
+                ).toFixed(1)}%.`,
+                `The voice remained consistent across ${LIVE_STABLE_REQUIRED} observations.`,
+                "Recommended action: ALLOW the call."
+            ]
+        );
+
+
+        updateLiveEvidenceDisplay(
+            stableResult
+        );
+
     }
+
+}
+
+async function publishStableLiveNotification(
+    stableResult,
+    riskLevel,
+    action
+) {
+    if (liveStableNotificationSent || !liveNotificationSource) {
+        return;
+    }
+
+    liveStableNotificationSent = true;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/notifications/live-final`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                source: liveNotificationSource,
+                risk_score: stableResult.riskScore,
+                risk_level: riskLevel,
+                action,
+                reasons: [
+                    `Stable ${stableResult.prediction.toUpperCase()} voice decision from ${LIVE_STABLE_REQUIRED} consecutive observations.`
+                ]
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Stable notification failed (${response.status})`);
+        }
+        const data = await response.json();
+        if (data.notification && window.voiceShieldNotify) {
+            await window.voiceShieldNotify(data.notification);
+        }
+    } catch (error) {
+        liveStableNotificationSent = false;
+        console.warn("Stable live notification failed:", error);
+    }
+}
+/* ============================================================
+   LIVE EVIDENCE COUNTER
+   ============================================================ */
+
+function updateLiveEvidenceDisplay(
+    stableResult
+) {
+
+    const monitor =
+        document.querySelector(
+            ".vs-live-monitor"
+        );
+
+    if (!monitor) {
+        return;
+    }
+
+    let evidence =
+        document.getElementById(
+            "vs-live-evidence"
+        );
 
     /*
-     * Show realtime section.
+     * Create it once.
+     * This does NOT require changing index.html.
      */
 
-    if (realtimeSection) {
+    if (!evidence) {
 
-        realtimeSection.classList.remove(
-            "hidden"
+        evidence =
+            document.createElement(
+                "div"
+            );
+
+        evidence.id =
+            "vs-live-evidence";
+
+        evidence.style.marginTop =
+            "8px";
+
+        evidence.style.textAlign =
+            "center";
+
+        evidence.style.fontSize =
+            "10px";
+
+        evidence.style.letterSpacing =
+            "0.08em";
+
+        evidence.style.opacity =
+            "0.65";
+
+        monitor.appendChild(
+            evidence
         );
+
     }
+
+    if (
+        stableResult.stable
+    ) {
+
+        evidence.textContent =
+            `STATUS: ${stableResult.completionLabel || "CALL COMPLETED"} • ` +
+            `${stableResult.evidenceCount} CHUNKS PROCESSED`;
+
+    } else {
+
+        evidence.textContent =
+            `SECURITY VERIFICATION • ` +
+            `${stableResult.evidenceCount}/` +
+            `${stableResult.requiredCount} OBSERVATIONS`;
+
+    }
+
 }
 
 function riskScoreElementExists() {
@@ -3615,7 +5267,35 @@ async function stopRealTimeMicrophone() {
     );
 
     liveCallActive = false;
+    /*
+    * Stop browser transcription.
+    */
 
+    if (
+        liveSpeechRecognition
+    ) {
+
+        if (liveTranscriptInterim.trim()) {
+            liveTranscriptFinal +=
+                `${liveTranscriptInterim.trim()} `;
+            liveTranscriptInterim = "";
+            updateLiveTranscriptDisplay();
+        }
+
+        try {
+
+            liveSpeechRecognition.stop();
+
+        } catch (error) {
+
+            console.warn(
+                "Transcription stop skipped:",
+                error
+            );
+
+        }
+
+    }
     if (liveChunkTimer) {
 
         clearInterval(
@@ -3638,11 +5318,11 @@ async function stopRealTimeMicrophone() {
     }
 
     stopLiveCallTimer();
-    liveProcessing = false;
-    liveChunksProcessed = 0;
     liveRiskHistory = [];
     updateLiveListeningState(false);
-    updateLiveProcessingState(false);
+    if (!liveDecisionMade) {
+        showLiveSecurityAnalyzing();
+    }
 
     stopLiveVisualizer();
 
@@ -3660,7 +5340,6 @@ async function stopRealTimeMicrophone() {
     }
 
     updateLiveCallUI(false);
-    updateLiveSecurityStatus(false);
 
     if (chunkTimelineCard && chunkTimeline && chunkTimeline.children.length) {
         chunkTimelineCard.classList.remove("hidden");
@@ -3677,6 +5356,11 @@ async function stopRealTimeMicrophone() {
     console.log(
         "LIVE MICROPHONE STOPPED"
     );
+    liveSpeechRecognition =
+    null;
+
+    liveTranscriptInterim =
+        "";
 }
 function updateLiveCallUI(active) {
 
@@ -3716,6 +5400,13 @@ function updateLiveCallUI(active) {
 ============================================================ */
 
 function handleLiveCallEvent(event) {
+    if (event && event.event === "chunk_analysis") {
+        handleLiveAnalysisEvent({
+            ...event,
+            live_chunk_index: event.chunk_index
+        });
+        return;
+    }
 
     if (!event || !event.event) {
         return;

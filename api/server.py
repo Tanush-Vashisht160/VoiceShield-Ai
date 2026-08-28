@@ -11,12 +11,13 @@ from fastapi.staticfiles import StaticFiles
 
 from app.firewall import VoiceSecurityFirewall
 from fastapi.responses import StreamingResponse
-from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect
 import asyncio
 import wave
 
 from api.call_simulator import CallSimulator
 from app.realtime_engine import RealtimeDetectionEngine
+from app.transcription_service import transcribe_audio
 from notifications import NotificationManager
 # ============================================================
 # PATHS
@@ -229,6 +230,21 @@ def create_test_notification():
         "success": True,
         "notification": notification,
     }
+
+
+@app.post("/api/notifications/live-final")
+def create_live_final_notification(payload: dict = Body(...)):
+    """Publish one alert after the browser confirms a stable live result."""
+
+    notification = notification_manager.publish_risk(
+        risk_score=payload.get("risk_score", 0),
+        risk_level=payload.get("risk_level", "LOW"),
+        action=payload.get("action", "ALLOW"),
+        reasons=payload.get("reasons", []),
+        source=payload.get("source", "microphone-call"),
+    )
+
+    return {"success": True, "notification": notification}
 
 
 # ============================================================
@@ -465,6 +481,13 @@ async def simulate_call(
 
         input_path.write_bytes(content)
 
+        transcription = await asyncio.to_thread(
+            transcribe_audio,
+            content,
+            audio.filename,
+            audio.content_type or "audio/webm",
+        )
+
         print(
             f"[LIVE] Received chunk: "
             f"{audio.filename} "
@@ -498,16 +521,10 @@ async def simulate_call(
         ):
             events.append(event)
 
-            if event.get("event") == "chunk_analysis":
-                publish_result_notification(
-                    event,
-                    source=f"simulated-call:{uuid.uuid4().hex}",
-                    chunk_index=event.get("chunk_index"),
-                )
-
         return {
             "success": True,
             "events": events,
+            "transcription": transcription,
         }
 
     except HTTPException:
@@ -633,13 +650,6 @@ async def live_call(websocket: WebSocket):
                         realtime_engine.analyze,
                         temp_path,
                     )
-
-                    for chunk in result.get("chunks", []):
-                        publish_result_notification(
-                            chunk,
-                            source=f"websocket-call:{session_id}",
-                            chunk_index=chunk.get("chunk_index"),
-                        )
 
                     event = {
                         "event": "live_analysis",

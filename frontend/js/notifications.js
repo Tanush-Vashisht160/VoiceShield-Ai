@@ -113,6 +113,24 @@
         }
     }
 
+    async function deliverNotification(notification) {
+        if (!notification) {
+            return;
+        }
+
+        lastNotificationId = Math.max(
+            lastNotificationId,
+            Number(notification.id)
+        );
+        localStorage.setItem(
+            storageKey,
+            String(lastNotificationId)
+        );
+        await notify(notification);
+    }
+
+    window.voiceShieldNotify = deliverNotification;
+
     async function poll() {
 
         try {
@@ -127,15 +145,7 @@
             const data = await response.json();
 
             for (const notification of data.notifications || []) {
-                lastNotificationId = Math.max(
-                    lastNotificationId,
-                    Number(notification.id)
-                );
-                localStorage.setItem(
-                    storageKey,
-                    String(lastNotificationId)
-                );
-                await notify(notification);
+                await deliverNotification(notification);
             }
         } catch (error) {
             console.debug("Security notification service unavailable.");
@@ -166,7 +176,8 @@
                     throw new Error(`Test alert failed (${response.status})`);
                 }
 
-                await poll();
+                const data = await response.json();
+                await deliverNotification(data.notification);
             } catch (error) {
                 console.error("Test notification failed:", error);
             }

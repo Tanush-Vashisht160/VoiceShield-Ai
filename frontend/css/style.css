@@ -1970,6 +1970,20 @@ body.security-danger {
     --danger-soft: rgba(255, 59, 92, 0.16);
 }
 
+body.security-success {
+    --neon: #56ffd0;
+    --neon-soft: rgba(86, 255, 208, 0.15);
+    --border: rgba(86, 255, 208, 0.16);
+    --border-bright: rgba(86, 255, 208, 0.38);
+}
+
+body.security-warning {
+    --neon: #ffd166;
+    --neon-soft: rgba(255, 209, 102, 0.14);
+    --border: rgba(255, 209, 102, 0.16);
+    --border-bright: rgba(255, 209, 102, 0.38);
+}
+
 
 /* Background red atmosphere */
 
@@ -2937,6 +2951,18 @@ body.security-danger .prediction-badge {
     opacity: 0.65;
 }
 
+.vs-live-transcript {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    font-size: 12px;
+    line-height: 1.6;
+    opacity: 0.9;
+    min-height: 42px;
+    max-height: 90px;
+    overflow-y: auto;
+}
+
 .vs-live-monitor.active .vs-listening-label::before {
     content: "●";
     margin-right: 6px;
@@ -3175,4 +3201,43 @@ body.security-danger .prediction-badge {
 .notification-test-button:hover {
     border-color: var(--warning);
     background: rgba(255, 209, 102, 0.12);
+}
+
+/* ============================================================
+   LIVE ANALYSIS SPINNER
+   Small inline loader used only while the final
+   live-call security decision is being calculated.
+============================================================ */
+
+.live-analysis-spinner {
+
+    display: inline-block;
+
+    width: 10px;
+    height: 10px;
+
+    margin-right: 7px;
+
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+
+    border-radius: 50%;
+
+    vertical-align: -1px;
+
+    animation:
+        liveAnalysisSpin 0.75s linear infinite;
+}
+
+
+@keyframes liveAnalysisSpin {
+
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+
 }

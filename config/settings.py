@@ -41,6 +41,9 @@ MODEL_NAME = os.getenv(
     "MelodyMachine/Deepfake-audio-detection-V2",
 )
 
+SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
+ELEVENLABS_API_KEY = os.getenv("ElevenLabs_API_KEY")
+
 
 # ============================================================
 # RISK SETTINGS
@@ -79,6 +82,9 @@ class Settings:
     debug = DEBUG
 
     model_name = MODEL_NAME
+
+    sarvam_api_key = SARVAM_API_KEY
+    elevenlabs_api_key = ELEVENLABS_API_KEY
 
     fake_threshold = FAKE_THRESHOLD
     high_risk_threshold = HIGH_RISK_THRESHOLD
