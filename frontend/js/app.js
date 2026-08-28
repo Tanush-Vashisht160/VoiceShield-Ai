@@ -4169,86 +4169,162 @@ function finalizeLiveSecurityDecision() {
         liveCallStatus.textContent = "CALL ANALYSIS COMPLETE";
     }
 }
-
 function showLiveCompletionSummary(
     prediction,
     stableResult,
-    label = "CALL COMPLETED"
+    label = "TEST COMPLETED"
 ) {
-
     const normalizedPrediction =
         String(prediction || "unknown").toLowerCase();
 
     const isFake = normalizedPrediction === "fake";
     const isReal = normalizedPrediction === "real";
+    const isSuspicious =
+        !isFake && !isReal;
+
+    /*
+     * ------------------------------------------------------------
+     * FINAL VERDICT
+     * ------------------------------------------------------------
+     */
+
     const verdict = isFake
-        ? "FAKE VOICE"
+        ? "FAKE"
         : isReal
-            ? "REAL VOICE"
-            : "SUSPICIOUS VOICE";
-    const action = isFake
-        ? "BLOCK"
-        : isReal
-            ? "ALLOW"
-            : "MONITOR";
+        ? "REAL"
+        : "SUSPICIOUS";
+
+    /*
+     * ------------------------------------------------------------
+     * FINAL STATUS HEADER
+     * ------------------------------------------------------------
+     */
+
     const badge = isFake
         ? "[!] COMPLETED SYNTHETIC VOICE DETECTED"
         : isReal
-            ? "[OK] COMPLETED AUTHENTIC VOICE VERIFIED"
-            : "[*] COMPLETED INCONCLUSIVE / SUSPICIOUS PATTERN";
+        ? "[OK] COMPLETED AUTHENTIC VOICE VERIFIED"
+        : "[*] COMPLETED INCONCLUSIVE / SUSPICIOUS PATTERN";
+
+    /*
+     * ------------------------------------------------------------
+     * FINAL TITLE
+     * ------------------------------------------------------------
+     */
+
     const title = isFake
         ? "Synthetic Voice Detected"
         : isReal
-            ? "Authentic Voice Confirmed"
-            : "Suspicious Audio Detected";
+        ? "Authentic Voice Confirmed"
+        : "Suspicious Audio Detected";
+
+    /*
+     * ------------------------------------------------------------
+     * FINAL DESCRIPTION + RECOMMENDED ACTION
+     * ------------------------------------------------------------
+     */
+
     const description = isFake
         ? "Multiple voice segments generated strong deepfake evidence. Recommended Action: Block call immediately."
         : isReal
-            ? "Voice traits match expected human baseline. It is safe to proceed with this call."
-            : "Inconsistent audio signals detected. Exercise caution before proceeding.";
+        ? "Voice traits match expected human baseline. It is safe to proceed with this call."
+        : "Inconsistent audio signals detected. Exercise caution before proceeding.";
+
+    const action = isFake
+        ? "BLOCK"
+        : isReal
+        ? "ALLOW"
+        : "MONITOR";
+
+    /*
+     * ------------------------------------------------------------
+     * REMOVE TEMPORARY ANALYZING STATE
+     * ------------------------------------------------------------
+     */
 
     const processingStatus =
         document.getElementById("live-processing-status");
 
     if (processingStatus) {
         processingStatus.textContent =
-            `${label} - ${verdict} - ${action}`;
+            "TEST COMPLETED";
+
         processingStatus.classList.remove("processing");
     }
 
+    /*
+     * ------------------------------------------------------------
+     * SECURITY STATUS HEADER
+     * ------------------------------------------------------------
+     */
+
     if (resultTag) {
-        resultTag.textContent = "LIVE • COMPLETE";
+        resultTag.textContent =
+            "TEST COMPLETED";
     }
+
+    /*
+     * ------------------------------------------------------------
+     * APPLY FINAL SECURITY COLOUR
+     * ONLY AFTER ALL ANALYSIS IS COMPLETE
+     * ------------------------------------------------------------
+     */
 
     document.body.classList.remove(
         "security-danger",
         "security-success",
         "security-warning"
     );
+
     document.body.classList.add(
         isFake
             ? "security-danger"
             : isReal
-                ? "security-success"
-                : "security-warning"
+            ? "security-success"
+            : "security-warning"
     );
+
+    /*
+     * ------------------------------------------------------------
+     * FINAL RESULT BADGE
+     * ------------------------------------------------------------
+     */
 
     if (predictionBadge) {
         predictionBadge.textContent = badge;
     }
 
+    /*
+     * ------------------------------------------------------------
+     * FINAL RESULT TITLE
+     * ------------------------------------------------------------
+     */
+
     if (predictionText) {
         predictionText.textContent = title;
     }
+
+    /*
+     * ------------------------------------------------------------
+     * FINAL RESULT DESCRIPTION
+     * ------------------------------------------------------------
+     */
 
     if (predictionDescription) {
         predictionDescription.textContent = description;
     }
 
+    /*
+     * ------------------------------------------------------------
+     * FINAL RISK STATE
+     * ------------------------------------------------------------
+     */
+
     if (riskLevel) {
-        riskLevel.textContent = isFake
-            ? "HIGH RISK"
-            : isReal
+        riskLevel.textContent =
+            isFake
+                ? "HIGH RISK"
+                : isReal
                 ? "LOW RISK"
                 : "MEDIUM RISK";
     }
@@ -4257,13 +4333,55 @@ function showLiveCompletionSummary(
         riskAction.textContent = action;
     }
 
-    applyRiskStyle(isFake ? "HIGH" : isReal ? "LOW" : "MEDIUM");
+    /*
+     * ------------------------------------------------------------
+     * FINAL RISK STYLING
+     * ------------------------------------------------------------
+     */
+
+    applyRiskStyle(
+        isFake
+            ? "HIGH"
+            : isReal
+            ? "LOW"
+            : "MEDIUM"
+    );
+
+    /*
+     * ------------------------------------------------------------
+     * FINAL EVIDENCE / COMPLETION INDICATOR
+     * ------------------------------------------------------------
+     */
 
     updateLiveEvidenceDisplay({
-        ...stableResult,
+        ...(stableResult || {}),
         stable: true,
-        completionLabel: label
+        prediction: normalizedPrediction,
+        completionLabel: "TEST COMPLETED"
     });
+
+    /*
+     * ------------------------------------------------------------
+     * LOG FINAL SECURITY DECISION
+     * ------------------------------------------------------------
+     */
+
+    console.log(
+        `LIVE ANALYSIS COMPLETED: ${verdict}`
+    );
+
+    console.log(
+        "FINAL LIVE SECURITY RESULT:",
+        {
+            verdict,
+            action,
+            evidenceCount:
+                stableResult?.evidenceCount || 0,
+            requiredCount:
+                stableResult?.requiredCount ||
+                LIVE_STABLE_REQUIRED
+        }
+    );
 }
 /* ============================================================
    LIVE PREDICTION STABILITY
@@ -4756,14 +4874,15 @@ function updateLiveThreatDisplay(event, stableResult) {
 
 
         if (predictionBadge) {
-
-            predictionBadge.innerHTML =
-                `<span class="live-analysis-spinner" aria-hidden="true"></span>` +
-                `ANALYZING • ${stableResult.evidenceCount}/${stableResult.requiredCount}`;
+            predictionBadge.innerHTML = `
+                <div class="live-analysis-loader">
+                    <span class="loader" aria-hidden="true"></span>
+                    <div class="live-analysis-label">ANALYZING VOICE</div>
+                </div>
+            `;
 
             predictionBadge.className =
                 "prediction-badge live";
-
         }
 
 
@@ -5236,12 +5355,20 @@ function updateLiveEvidenceDisplay(
     if (
         stableResult.stable
     ) {
+        const processedChunks =
+            Number(stableResult.evidenceCount || 0);
+
+        const totalChunks =
+            Number(
+                stableResult.requiredCount ||
+                LIVE_STABLE_REQUIRED ||
+                processedChunks
+            );
 
         evidence.textContent =
-            `STATUS: ${stableResult.completionLabel || "CALL COMPLETED"} • ` +
-            `${stableResult.evidenceCount} CHUNKS PROCESSED`;
-
-    } else {
+            `STATUS: ${stableResult.completionLabel || "TEST COMPLETED"} • ` +
+            `${processedChunks}/${totalChunks} CHUNKS PROCESSED`;
+    }else {
 
         evidence.textContent =
             `SECURITY VERIFICATION • ` +
