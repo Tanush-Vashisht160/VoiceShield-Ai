@@ -1139,6 +1139,28 @@ function updateThreatAssessment(result) {
             risk.action || "ALLOW"
         ).toUpperCase();
 
+    const reasons = Array.isArray(risk.reasons)
+        ? risk.reasons
+        : [];
+
+    if (score >= 40 || action !== "ALLOW") {
+        window.dispatchEvent(
+            new CustomEvent(
+                "voiceshield:challenge-required",
+                {
+                    detail: {
+                        risk: {
+                            score,
+                            level,
+                            action,
+                            reasons
+                        }
+                    }
+                }
+            )
+        );
+    }
+
     const scoreElement =
         document.getElementById(
             "risk-score"
@@ -5903,6 +5925,17 @@ function addLiveChunk(event) {
 initializeGlassInteraction();
 
 checkSystemHealth();
+
+
+/* ============================================================
+   CHALLENGE RESPONSE EVENT LISTENER
+============================================================ */
+
+window.addEventListener("voiceshield:challenge-required", (event) => {
+    if (window.attachChallengeEvents && typeof window.attachChallengeEvents === "function") {
+        window.attachChallengeEvents();
+    }
+});
 
 
 /* ============================================================
