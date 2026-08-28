@@ -149,7 +149,15 @@ def startup_event():
     print("=" * 70)
 
     firewall = VoiceSecurityFirewall()
-    firewall.challenge_service = challenge_service
+
+    # Wire the existing VoiceShield detector and speaker verifier
+    # into the isolated challenge-response service.
+    firewall.challenge_service = ChallengeService(
+        risk_engine=firewall.risk_engine,
+        speaker_verifier=firewall.speaker_verifier,
+        detector=firewall.detector,
+    )
+
     realtime_engine = RealtimeDetectionEngine()
     print("=" * 70)
     print("VoiceShield AI API READY")

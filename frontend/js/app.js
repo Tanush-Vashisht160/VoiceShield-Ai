@@ -1143,24 +1143,6 @@ function updateThreatAssessment(result) {
         ? risk.reasons
         : [];
 
-    if (score >= 40 || action !== "ALLOW") {
-        window.dispatchEvent(
-            new CustomEvent(
-                "voiceshield:challenge-required",
-                {
-                    detail: {
-                        risk: {
-                            score,
-                            level,
-                            action,
-                            reasons
-                        }
-                    }
-                }
-            )
-        );
-    }
-
     const scoreElement =
         document.getElementById(
             "risk-score"
@@ -1858,166 +1840,317 @@ let liveTranscriptInterim = "";
 let liveProviderTranscript = "";
 let liveTranscriptProvider = null;
 let liveSpeechSupported = false;
+// Tracks whether SpeechRecognition should remain active
+// because the VoiceShield call is still running.
+let liveSpeechShouldRun = false;
+
+// Prevents multiple simultaneous restart timers.
+let liveSpeechRestartTimer = null;
+let liveTranscriptBoxShowing = false;
 /* ============================================================
    INITIALIZE LIVE TRANSCRIPTION
    ============================================================ */
-
 function initializeLiveTranscription() {
-
     const SpeechRecognition =
         window.SpeechRecognition ||
         window.webkitSpeechRecognition;
 
+    /*
+     * Browser does not support Web Speech API.
+     */
     if (!SpeechRecognition) {
-
         console.warn(
             "Speech Recognition API is not supported by this browser."
         );
 
-        liveSpeechSupported =
-            false;
+        liveSpeechSupported = false;
+
+        updateLiveTranscriptStatus(
+            "TRANSCRIPTION UNAVAILABLE"
+        );
 
         return;
-
     }
 
-    liveSpeechSupported =
-        true;
+    liveSpeechSupported = true;
 
+    /*
+     * If an older recognition instance exists,
+     * stop it before creating a new one.
+     */
+    if (liveSpeechRecognition) {
+        try {
+            liveSpeechRecognition.onend = null;
+            liveSpeechRecognition.onerror = null;
+            liveSpeechRecognition.onresult = null;
+            liveSpeechRecognition.stop();
+        } catch (error) {
+            console.warn(
+                "Previous speech recognition cleanup warning:",
+                error
+            );
+        }
+    }
+
+    /*
+     * Create a fresh recognition instance.
+     */
     liveSpeechRecognition =
         new SpeechRecognition();
 
     /*
-     * Continuous mode keeps listening while
-     * the live call is active.
+     * Keep recognition continuous while the call is active.
      */
-
-    liveSpeechRecognition.continuous =
-        true;
-
-    liveSpeechRecognition.interimResults =
-        true;
+    liveSpeechRecognition.continuous = true;
 
     /*
-     * Change this later if you want Indian-language
-     * transcription.
-     *
-     * Examples:
-     *
-     * en-IN
-     * hi-IN
-     * en-US
+     * Show words while the caller is speaking.
      */
+    liveSpeechRecognition.interimResults = true;
 
-    liveSpeechRecognition.lang =
-        "en-IN";
+    /*
+     * Indian English is appropriate for your current project.
+     */
+    liveSpeechRecognition.lang = "en-IN";
 
+    /*
+     * ------------------------------------------------------------
+     * RECOGNITION STARTED
+     * ------------------------------------------------------------
+     */
+    liveSpeechRecognition.onstart = () => {
+        console.log(
+            "LIVE TRANSCRIPTION STARTED"
+        );
 
-    liveSpeechRecognition.onresult =
-        (event) => {
+        updateLiveTranscriptStatus(
+            "LISTENING FOR SPEECH"
+        );
+    };
 
-            let finalText = "";
-            let interimText = "";
+    /*
+     * ------------------------------------------------------------
+     * SPEECH RESULT
+     * ------------------------------------------------------------
+     *
+     * This is where the ACTUAL WORDS are received.
+     */
+    liveSpeechRecognition.onresult = (event) => {
+        let finalText = "";
+        let interimText = "";
 
-            for (
-                let i = event.resultIndex;
-                i < event.results.length;
-                i++
-            ) {
-
-                const transcript =
-                    event.results[i][0]
-                        .transcript;
-
-                if (
-                    event.results[i].isFinal
-                ) {
-
-                    finalText +=
-                        transcript + " ";
-
-                } else {
-
-                    interimText +=
-                        transcript;
-
-                }
-
-            }
-
-
-            if (finalText.trim()) {
-
-                liveTranscriptFinal +=
-                    finalText;
-
-            }
-
-
-            liveTranscriptInterim =
-                interimText;
-
-            updateLiveTranscriptDisplay();
-
-        };
-
-
-    liveSpeechRecognition.onerror =
-        (event) => {
-
-            /*
-             * Do not stop the security detector
-             * if transcription fails.
-             */
-
-            console.warn(
-                "Live transcription warning:",
-                event.error
-            );
-
-            updateLiveTranscriptStatus(
-                "TRANSCRIPTION UNAVAILABLE"
-            );
-
-        };
-
-
-    liveSpeechRecognition.onend =
-        () => {
-
-            /*
-             * Chrome may automatically end recognition.
-             *
-             * Restart only while the call is active.
-             */
+        for (
+            let i = event.resultIndex;
+            i < event.results.length;
+            i++
+        ) {
+            const transcript =
+                event.results[i][0]?.transcript || "";
 
             if (
-                liveCallActive &&
-                liveSpeechRecognition
+                event.results[i].isFinal
             ) {
+                finalText +=
+                    transcript + " ";
+            } else {
+                interimText +=
+                    transcript;
+            }
+        }
 
-                try {
+        /*
+         * Store confirmed speech permanently.
+         */
+        if (finalText.trim()) {
+            liveTranscriptFinal +=
+                finalText + " ";
+        }
 
-                    liveSpeechRecognition.start();
+        /*
+         * Store currently spoken/interim text.
+         */
+        liveTranscriptInterim =
+            interimText;
 
-                } catch (error) {
+        /*
+         * Immediately refresh the visible transcript.
+         */
+        updateLiveTranscriptDisplay();
 
-                    console.warn(
-                        "Transcription restart skipped:",
-                        error
-                    );
+        console.log(
+            "LIVE TRANSCRIPT:",
+            finalText || interimText
+        );
+    };
 
-                }
+    /*
+     * ------------------------------------------------------------
+     * RECOGNITION ERROR
+     * ------------------------------------------------------------
+     */
+    liveSpeechRecognition.onerror = (event) => {
+        const error =
+            event?.error || "unknown";
 
+        console.warn(
+            "Live transcription warning:",
+            error
+        );
+
+        /*
+         * Permission problems cannot be fixed by restarting.
+         */
+        if (
+            error === "not-allowed" ||
+            error === "service-not-allowed"
+        ) {
+            liveSpeechShouldRun = false;
+
+            updateLiveTranscriptStatus(
+                error === "not-allowed"
+                    ? "MICROPHONE PERMISSION REQUIRED"
+                    : "SPEECH SERVICE UNAVAILABLE"
+            );
+
+            return;
+        }
+
+        /*
+         * "no-speech" is NOT a fatal error.
+         *
+         * The caller may simply have paused.
+         */
+        if (
+            error === "no-speech"
+        ) {
+            updateLiveTranscriptStatus(
+                "LISTENING FOR SPEECH"
+            );
+
+            return;
+        }
+
+        /*
+         * Network/service errors are recoverable.
+         */
+        if (
+            error === "network" ||
+            error === "aborted" ||
+            error === "audio-capture"
+        ) {
+            updateLiveTranscriptStatus(
+                "SPEECH SERVICE RECONNECTING..."
+            );
+
+            scheduleLiveSpeechRestart();
+
+            return;
+        }
+
+        /*
+         * Unknown errors should not kill the
+         * VoiceShield security analysis.
+         */
+        console.warn(
+            "Unhandled speech recognition error:",
+            error
+        );
+
+        scheduleLiveSpeechRestart();
+    };
+
+    /*
+     * ------------------------------------------------------------
+     * RECOGNITION ENDED
+     * ------------------------------------------------------------
+     *
+     * Chrome may terminate SpeechRecognition automatically.
+     * If the call is still active, restart it.
+     */
+    liveSpeechRecognition.onend = () => {
+        console.log(
+            "LIVE TRANSCRIPTION ENDED"
+        );
+
+        /*
+         * Do NOT restart after the user has ended
+         * the VoiceShield call.
+         */
+        if (!liveSpeechShouldRun) {
+            return;
+        }
+
+        scheduleLiveSpeechRestart();
+    };
+}
+
+/*
+ * ============================================================
+ * RESTART LIVE SPEECH RECOGNITION
+ * ============================================================
+ *
+ * Chrome's SpeechRecognition service can terminate unexpectedly.
+ * This function safely starts a new recognition session while
+ * the VoiceShield call is still active.
+ */
+function scheduleLiveSpeechRestart() {
+    /*
+     * Never restart if the call has already ended.
+     */
+    if (!liveSpeechShouldRun) {
+        return;
+    }
+
+    /*
+     * Prevent multiple restart timers from being created.
+     */
+    if (liveSpeechRestartTimer) {
+        return;
+    }
+
+    liveSpeechRestartTimer =
+        setTimeout(() => {
+            liveSpeechRestartTimer = null;
+
+            /*
+             * The user may have ended the call while
+             * the timer was waiting.
+             */
+            if (!liveSpeechShouldRun) {
+                return;
             }
 
-        };
+            try {
+                /*
+                 * Create a fresh recognition object.
+                 *
+                 * This is more reliable than repeatedly
+                 * calling start() on an ended instance.
+                 */
+                initializeLiveTranscription();
 
+                if (
+                    liveSpeechRecognition
+                ) {
+                    liveSpeechRecognition.start();
+
+                    console.log(
+                        "LIVE TRANSCRIPTION RESTARTED"
+                    );
+                }
+            } catch (error) {
+                console.warn(
+                    "Transcription restart failed:",
+                    error
+                );
+
+                /*
+                 * Try again after a short delay.
+                 */
+                scheduleLiveSpeechRestart();
+            }
+        }, 500);
 }
-/* ============================================================
-   LIVE TRANSCRIPT DISPLAY
-   ============================================================ */
-
 /* ============================================================
    LIVE TRANSCRIPT DISPLAY
    ------------------------------------------------------------
@@ -2211,26 +2344,30 @@ function updateLiveTranscriptStatus(
         return;
     }
 
-    const status =
-        document.createElement(
-            "div"
+    let statusElement =
+        transcriptBox.querySelector(
+            "[data-transcript-status]"
         );
 
-    status.style.marginTop =
-        "5px";
+    if (!statusElement) {
+        statusElement =
+            document.createElement("div");
+        statusElement.setAttribute(
+            "data-transcript-status",
+            "true"
+        );
+        statusElement.style.marginTop =
+            "5px";
+        statusElement.style.fontSize =
+            "9px";
+        statusElement.style.opacity =
+            "0.45";
+        transcriptBox.appendChild(
+            statusElement
+        );
+    }
 
-    status.style.fontSize =
-        "9px";
-
-    status.style.opacity =
-        "0.45";
-
-    status.textContent =
-        message;
-
-    transcriptBox.appendChild(
-        status
-    );
+    statusElement.textContent = message;
 
 }
 /* ============================================================
@@ -2348,15 +2485,46 @@ let liveDecisionMade = false;
 ============================================================ */
 
 let livePredictionHistory = [];
+/*
+ * ALL processed chunk results for this call.
+ *
+ * IMPORTANT:
+ * livePredictionHistory is intentionally limited to the latest
+ * 4 chunks for real-time stability.
+ *
+ * liveAllPredictionHistory is NEVER truncated during the call.
+ * It is used for the final call-level decision.
+ */
+let liveAllPredictionHistory = [];
 
+/*
+ * Current real-time security state.
+ *
+ * This is separate from the final decision.
+ */
+let liveSecurityState = "analyzing";
+
+/*
+ * Prevent repeated high-risk notifications.
+ *
+ * We do not want to spam the user on every chunk.
+ */
+let liveHighRiskNotificationSent = false;
+let liveSuspiciousNotificationSent = false;
 /*
  * ============================================================
  * LIVE RESULT STABILITY
+ * ============================================================
  *
- * A single chunk NEVER decides the call.
+ * A single chunk NEVER decides the live security state.
  *
- * Four consecutive strong results are required before
- * VoiceShield changes the final security state.
+ * VoiceShield uses the latest 4 processed chunks as a
+ * rolling evidence window for real-time security decisions.
+ *
+ * IMPORTANT:
+ * A stable LIVE result is NOT the final call decision.
+ * The final call decision is calculated separately from
+ * liveAllPredictionHistory when the call/stream ends.
  * ============================================================
  */
 
@@ -2447,16 +2615,15 @@ function showLiveSecurityAnalyzing() {
     }
 
     if (predictionBadge) {
-
-        predictionBadge.innerHTML =
-            `
-            <span class="live-analysis-spinner"
-                  aria-hidden="true"></span>
-            ANALYZING VOICE
-            `;
+        predictionBadge.innerHTML = `
+            <div class="live-analysis-loader">
+                <div class="matrix-loader" aria-hidden="true"></div>
+                <div class="live-analysis-label">ANALYZING VOICE</div>
+            </div>
+        `;
 
         predictionBadge.className =
-            "prediction-badge live";
+            "prediction-badge live live-analyzing";
     }
 
     if (predictionText) {
@@ -2651,27 +2818,22 @@ async function startLiveCall() {
 
 liveTranscriptFinal = "";
 liveTranscriptInterim = "";
-
+liveProviderTranscript = "";
+liveTranscriptProvider = null;
 initializeLiveTranscription();
 
 if (
     liveSpeechRecognition &&
     liveSpeechSupported
 ) {
-
     try {
-
         liveSpeechRecognition.start();
-
     } catch (error) {
-
         console.warn(
-            "Live transcription could not start:",
+            "Live transcription start skipped:",
             error
         );
-
     }
-
 }
 
 updateLiveTranscriptDisplay();
@@ -3308,11 +3470,22 @@ async function simulateLiveCall(file) {
         return;
     }
 
+    /*
+    * Reset all live-analysis state for a NEW call.
+    */
     livePredictionHistory = [];
+    liveAllPredictionHistory = [];
+
     liveStablePrediction = "unknown";
     liveStableFakeScore = 0;
     liveStableRiskScore = 0;
+
     liveStableNotificationSent = false;
+
+    liveHighRiskNotificationSent = false;
+    liveSuspiciousNotificationSent = false;
+
+    liveSecurityState = "analyzing";
     liveNotificationSource = `simulation-call:${Date.now()}`;
     liveDecisionMade = false;
 
@@ -3597,11 +3770,22 @@ async function startRealTimeMicrophone() {
 
         liveChunksProcessed = 0;
         liveRiskHistory = [];
+        /*
+        * Reset all live-analysis state for a NEW call.
+        */
         livePredictionHistory = [];
+        liveAllPredictionHistory = [];
+
         liveStablePrediction = "unknown";
         liveStableFakeScore = 0;
         liveStableRiskScore = 0;
+
         liveStableNotificationSent = false;
+
+        liveHighRiskNotificationSent = false;
+        liveSuspiciousNotificationSent = false;
+
+        liveSecurityState = "analyzing";
         liveNotificationSource = `microphone-call:${Date.now()}`;
         liveDecisionMade = false;
 
@@ -3650,6 +3834,11 @@ async function startRealTimeMicrophone() {
 
         liveCallActive = true;
         /*
+        * Keep browser speech recognition alive for the
+        * duration of the live call.
+        */
+        liveSpeechShouldRun = true;
+        /*
         * Start browser speech recognition.
         *
         * This is independent from deepfake detection.
@@ -3663,24 +3852,14 @@ async function startRealTimeMicrophone() {
             liveSpeechRecognition &&
             liveSpeechSupported
         ) {
-
             try {
-
                 liveSpeechRecognition.start();
-
-                console.log(
-                    "LIVE TRANSCRIPTION STARTED"
-                );
-
             } catch (error) {
-
                 console.warn(
-                    "Live transcription start skipped:",
+                    "Speech recognition start warning:",
                     error
                 );
-
             }
-
         }
         liveCallStartedAt = Date.now();
         liveChunkIndex = 0;
@@ -4114,7 +4293,13 @@ function handleLiveAnalysisEvent(event) {
 
 function finalizeLiveSecurityDecision() {
 
-    if (livePredictionHistory.length === 0) {
+    if (
+        liveAllPredictionHistory.length === 0
+    ) {
+        console.warn(
+            "Cannot finalize live security decision: no processed chunks."
+        );
+
         return;
     }
 
@@ -4139,36 +4324,138 @@ function finalizeLiveSecurityDecision() {
         return;
     }
 
-    const observations = livePredictionHistory;
-    const fakeCount = observations.filter(
-        item => item.prediction === "fake"
-    ).length;
-    const averageFakeScore = observations.reduce(
-        (sum, item) => sum + item.fakeScore,
-        0
-    ) / observations.length;
-    const averageRiskScore = observations.reduce(
-        (sum, item) => sum + item.riskScore,
-        0
-    ) / observations.length;
-    const realCount = observations.filter(
-        item => item.prediction === "real"
-    ).length;
-    const prediction = fakeCount > observations.length / 2
-        ? "fake"
-        : realCount > observations.length / 2
-            ? "real"
-            : "suspicious";
+    /*
+    * ============================================================
+    * FINAL ALL-CHUNK AGGREGATION
+    * ============================================================
+    */
+
+    const fakeCount =
+        observations.filter(
+            item =>
+                item.prediction === "fake"
+        ).length;
+
+    const realCount =
+        observations.filter(
+            item =>
+                item.prediction === "real"
+        ).length;
+
+    const unknownCount =
+        observations.filter(
+            item =>
+                item.prediction !== "fake" &&
+                item.prediction !== "real"
+        ).length;
+
+    const totalCount =
+        observations.length;
+
+    const fakePercentage =
+        totalCount > 0
+            ? (fakeCount / totalCount) * 100
+            : 0;
+
+    const realPercentage =
+        totalCount > 0
+            ? (realCount / totalCount) * 100
+            : 0;
+
+    const averageFakeScore =
+        observations.reduce(
+            (sum, item) =>
+                sum + Number(item.fakeScore || 0),
+            0
+        ) / totalCount;
+
+    const averageRiskScore =
+        observations.reduce(
+            (sum, item) =>
+                sum + Number(item.riskScore || 0),
+            0
+        ) / totalCount;
+
+    /*
+    * ============================================================
+    * FINAL DECISION
+    * ============================================================
+    *
+    * FAKE wins when it has more evidence than REAL.
+    *
+    * REAL wins only when REAL has more evidence.
+    *
+    * A tie becomes SUSPICIOUS.
+    */
+    let prediction = "suspicious";
+
+    if (
+        fakeCount > realCount
+    ) {
+        prediction = "fake";
+    } else if (
+        realCount > fakeCount
+    ) {
+        prediction = "real";
+    }
+
+    /*
+    * If more than half of the observations are unknown,
+    * the final result is not reliable enough to call REAL/FAKE.
+    */
+    if (
+        unknownCount >
+        totalCount / 2
+    ) {
+        prediction = "suspicious";
+    }
+
+    const finalRiskScore =
+        prediction === "fake"
+            ? Math.max(
+                averageRiskScore,
+                averageFakeScore * 100,
+                fakePercentage
+            )
+            : prediction === "suspicious"
+                ? Math.max(
+                    averageRiskScore,
+                    fakePercentage
+                )
+                : Math.min(
+                    averageRiskScore,
+                    fakePercentage
+                );
 
     const stableResult = {
         stable: true,
+
         prediction,
-        fakeScore: averageFakeScore,
-        riskScore: prediction === "fake"
-            ? Math.max(averageRiskScore, averageFakeScore * 100)
-            : averageRiskScore,
-        evidenceCount: observations.length,
-        requiredCount: LIVE_STABLE_REQUIRED
+
+        fakeScore:
+            averageFakeScore,
+
+        riskScore:
+            Math.min(
+                100,
+                finalRiskScore
+            ),
+
+        /*
+        * FINAL evidence count.
+        */
+        evidenceCount:
+            totalCount,
+
+        requiredCount:
+            totalCount,
+
+        fakeCount,
+        realCount,
+        unknownCount,
+
+        fakePercentage,
+        realPercentage
     };
 
     updateLiveThreatDisplay(
@@ -4186,10 +4473,20 @@ function finalizeLiveSecurityDecision() {
         stableResult,
         completionLabel
     );
+    /*
+    * Add the actual evidence count to the existing
+    * live evidence display.
+    *
+    * No frontend HTML structure change is required.
+    */
+    updateLiveEvidenceDisplay(
+        stableResult
+    );
 
     if (liveCallStatus) {
         liveCallStatus.textContent = "CALL ANALYSIS COMPLETE";
     }
+    liveDecisionMade = true;
 }
 function showLiveCompletionSummary(
     prediction,
@@ -4223,10 +4520,10 @@ function showLiveCompletionSummary(
      */
 
     const badge = isFake
-        ? "[!] COMPLETED SYNTHETIC VOICE DETECTED"
+        ? "[⚠ COMPLETED] SYNTHETIC VOICE DETECTED"
         : isReal
-        ? "[OK] COMPLETED AUTHENTIC VOICE VERIFIED"
-        : "[*] COMPLETED INCONCLUSIVE / SUSPICIOUS PATTERN";
+        ? "[✓ COMPLETED] AUTHENTIC VOICE VERIFIED"
+        : "[⚡ COMPLETED] INCONCLUSIVE / SUSPICIOUS PATTERN";
 
     /*
      * ------------------------------------------------------------
@@ -4313,6 +4610,7 @@ function showLiveCompletionSummary(
      */
 
     if (predictionBadge) {
+        predictionBadge.className = "prediction-badge";
         predictionBadge.textContent = badge;
     }
 
@@ -4384,6 +4682,24 @@ function showLiveCompletionSummary(
 
     /*
      * ------------------------------------------------------------
+     * OPTIONAL ADDITIONAL VERIFICATION
+     * ------------------------------------------------------------
+     * Only suspicious/inconclusive calls should expose the
+     * challenge-response panel.
+     */
+    if (isSuspicious) {
+        window.dispatchEvent(
+            new CustomEvent("voiceshield:challenge-show", {
+                detail: {
+                    riskScore: Number(stableResult?.riskScore || 0),
+                    prediction: normalizedPrediction
+                }
+            })
+        );
+    }
+
+    /*
+     * ------------------------------------------------------------
      * LOG FINAL SECURITY DECISION
      * ------------------------------------------------------------
      */
@@ -4418,89 +4734,145 @@ function showLiveCompletionSummary(
    ============================================================ */
 
 function calculateStableLiveResult(event) {
+    /*
+     * ============================================================
+     * REAL-TIME STABILITY + ACCUMULATED EVIDENCE
+     * ============================================================
+     *
+     * This function serves TWO purposes:
+     *
+     * 1. Keep the latest 4 chunks for immediate live decisions.
+     * 2. Keep ALL processed chunks for the final call decision.
+     *
+     * The rolling window is never used as the final call history.
+     */
 
-    const prediction =
-        String(
-            event.prediction || "unknown"
-        ).toLowerCase();
+    const prediction = String(
+        event?.prediction || "unknown"
+    ).toLowerCase();
 
-    const fakeScore =
-        Number(
-            event.fake_score || 0
-        );
+    const fakeScore = Number(
+        event?.fake_score ?? 0
+    );
 
-    const riskScore =
-        Number(
-            event.risk_score || 0
-        );
+    const riskScore = Number(
+        event?.risk_score ?? 0
+    );
 
     /*
-     * Store this chunk.
+     * ------------------------------------------------------------
+     * VALIDATE NUMERIC VALUES
+     * ------------------------------------------------------------
+     *
+     * Never allow NaN / Infinity to corrupt the risk calculation.
      */
-    livePredictionHistory.push({
+    const safeFakeScore =
+        Number.isFinite(fakeScore)
+            ? Math.max(0, Math.min(1, fakeScore))
+            : 0;
+
+    const safeRiskScore =
+        Number.isFinite(riskScore)
+            ? Math.max(0, Math.min(100, riskScore))
+            : 0;
+
+    /*
+     * ------------------------------------------------------------
+     * STORE IN ALL-CHUNK HISTORY
+     * ------------------------------------------------------------
+     *
+     * This array is NEVER shifted.
+     */
+    liveAllPredictionHistory.push({
         prediction,
-        fakeScore,
-        riskScore
+        fakeScore: safeFakeScore,
+        riskScore: safeRiskScore,
+        timestamp: Date.now()
     });
 
     /*
-     * Keep only the latest stability window.
+     * ------------------------------------------------------------
+     * STORE IN ROLLING 4-CHUNK WINDOW
+     * ------------------------------------------------------------
+     */
+    livePredictionHistory.push({
+        prediction,
+        fakeScore: safeFakeScore,
+        riskScore: safeRiskScore,
+        timestamp: Date.now()
+    });
+
+    /*
+     * Keep ONLY the latest 4 chunks here.
      */
     if (
         livePredictionHistory.length >
         LIVE_STABILITY_WINDOW
     ) {
-
         livePredictionHistory.shift();
-
     }
 
     /*
-     * Not enough evidence yet.
+     * ------------------------------------------------------------
+     * NOT ENOUGH DATA FOR A STABLE LIVE DECISION
+     * ------------------------------------------------------------
      */
     if (
         livePredictionHistory.length <
         LIVE_STABILITY_WINDOW
     ) {
+        liveSecurityState = "analyzing";
 
         return {
             stable: false,
             prediction: "verifying",
-            fakeScore,
-            riskScore,
+
+            fakeScore: safeFakeScore,
+            riskScore: safeRiskScore,
+
             evidenceCount:
                 livePredictionHistory.length,
-            requiredCount:
-                LIVE_STABILITY_WINDOW
-        };
 
+            requiredCount:
+                LIVE_STABILITY_WINDOW,
+
+            totalEvidenceCount:
+                liveAllPredictionHistory.length
+        };
     }
 
-    const recent =
-        livePredictionHistory;
+    const recent = livePredictionHistory;
 
     /*
-     * Count strong FAKE results.
+     * ------------------------------------------------------------
+     * ROLLING-WINDOW COUNTS
+     * ------------------------------------------------------------
      */
-    const fakeCount =
-        recent.filter(
-            item =>
-                item.prediction === "fake" &&
-                item.fakeScore >=
-                    LIVE_FAKE_THRESHOLD
+
+    const strongFakeCount =
+        recent.filter(item =>
+            item.prediction === "fake" &&
+            item.fakeScore >= LIVE_FAKE_THRESHOLD
         ).length;
 
-    /*
-     * Count REAL results.
-     */
     const realCount =
-        recent.filter(
-            item =>
-                item.prediction === "real"
+        recent.filter(item =>
+            item.prediction === "real"
+        ).length;
+
+    const fakeCount =
+        recent.filter(item =>
+            item.prediction === "fake"
+        ).length;
+
+    const suspiciousCount =
+        recent.filter(item =>
+            item.prediction !== "fake" &&
+            item.prediction !== "real"
         ).length;
 
     /*
-     * Average fake probability.
+     * Average values from the latest 4 chunks.
      */
     const averageFakeScore =
         recent.reduce(
@@ -4509,9 +4881,6 @@ function calculateStableLiveResult(event) {
             0
         ) / recent.length;
 
-    /*
-     * Average risk.
-     */
     const averageRiskScore =
         recent.reduce(
             (sum, item) =>
@@ -4519,118 +4888,315 @@ function calculateStableLiveResult(event) {
             0
         ) / recent.length;
 
+    /*
+     * ------------------------------------------------------------
+     * LIVE SECURITY STATE
+     * ------------------------------------------------------------
+     *
+     * We intentionally require 3 of the latest 4 chunks to
+     * support a strong live conclusion.
+     *
+     * This prevents ONE bad/noisy chunk from triggering an alarm.
+     */
+    let livePrediction = "suspicious";
 
-    /* ========================================================
-       STABLE FAKE
-       ======================================================== */
-
+    /*
+     * HIGH-RISK FAKE
+     *
+     * At least 3 of the latest 4 chunks must be:
+     *
+     * prediction = fake
+     * AND
+     * fakeScore >= 0.85
+     */
     if (
-        fakeCount >=
-        LIVE_STABLE_REQUIRED
+        strongFakeCount >= 3
     ) {
-
-        liveStablePrediction =
-            "fake";
-
-        liveStableFakeScore =
-            averageFakeScore;
-
-        liveStableRiskScore =
-            Math.max(
-                averageRiskScore,
-                averageFakeScore * 100
-            );
-
-        return {
-
-            stable: true,
-
-            prediction: "fake",
-
-            fakeScore:
-                averageFakeScore,
-
-            riskScore:
-                liveStableRiskScore,
-
-            evidenceCount:
-                fakeCount,
-
-            requiredCount:
-                LIVE_STABLE_REQUIRED
-
-        };
-
+        livePrediction = "fake";
     }
 
-
-    /* ========================================================
-       STABLE REAL
-       ======================================================== */
-
-    if (
-        realCount >=
-        LIVE_STABLE_REQUIRED
+    /*
+     * AUTHENTIC / REAL
+     *
+     * At least 3 of the latest 4 chunks must be REAL.
+     *
+     * Notice that REAL does NOT win merely because the average
+     * fake score happens to be low.
+     */
+    else if (
+        realCount >= 3 &&
+        strongFakeCount === 0
     ) {
-
-        liveStablePrediction =
-            "real";
-
-        liveStableFakeScore =
-            averageFakeScore;
-
-        liveStableRiskScore =
-            averageRiskScore;
-
-        return {
-
-            stable: true,
-
-            prediction: "real",
-
-            fakeScore:
-                averageFakeScore,
-
-            riskScore:
-                averageRiskScore,
-
-            evidenceCount:
-                realCount,
-
-            requiredCount:
-                LIVE_STABLE_REQUIRED
-
-        };
-
+        livePrediction = "real";
     }
 
+    /*
+     * Otherwise the current rolling evidence is inconclusive.
+     */
+    else {
+        livePrediction = "suspicious";
+    }
 
-    /* ========================================================
-       INCONSISTENT
-       ======================================================== */
+    /*
+     * ------------------------------------------------------------
+     * LIVE STATE
+     * ------------------------------------------------------------
+     */
+    liveSecurityState =
+        livePrediction;
 
+    /*
+     * ------------------------------------------------------------
+     * LIVE RISK SCORE
+     * ------------------------------------------------------------
+     *
+     * If 3/4 or 4/4 are strong FAKE, risk must be high.
+     */
+    let liveRiskScore =
+        averageRiskScore;
+
+    if (
+        livePrediction === "fake"
+    ) {
+        liveRiskScore = Math.max(
+            averageRiskScore,
+            averageFakeScore * 100,
+            (strongFakeCount / recent.length) * 100
+        );
+    }
+
+    /*
+     * Suspicious should never accidentally become "safe".
+     */
+    if (
+        livePrediction === "suspicious"
+    ) {
+        liveRiskScore = Math.max(
+            liveRiskScore,
+            (strongFakeCount / recent.length) * 100
+        );
+    }
+
+    /*
+     * ------------------------------------------------------------
+     * RETURN LIVE RESULT
+     * ------------------------------------------------------------
+     */
     return {
+        stable: true,
 
-        stable: false,
-
-        prediction: "verifying",
+        prediction:
+            livePrediction,
 
         fakeScore:
             averageFakeScore,
 
         riskScore:
-            averageRiskScore,
+            Math.min(100, liveRiskScore),
 
         evidenceCount:
-            livePredictionHistory.length,
+            recent.length,
 
         requiredCount:
-            LIVE_STABILITY_WINDOW
+            LIVE_STABILITY_WINDOW,
 
+        totalEvidenceCount:
+            liveAllPredictionHistory.length,
+
+        fakeCount,
+
+        strongFakeCount,
+
+        realCount,
+
+        suspiciousCount
     };
-
 }
+/*
+ * ============================================================
+ * REAL-TIME SECURITY NOTIFICATION
+ * ============================================================
+ *
+ * This function is intentionally separate from the FINAL
+ * completion notification.
+ *
+ * It warns the user while the call is still happening.
+ */
+async function handleLiveSecurityState(
+    stableResult
+) {
+    if (
+        !stableResult ||
+        !stableResult.stable
+    ) {
+        return;
+    }
 
+    const prediction =
+        String(
+            stableResult.prediction || ""
+        ).toLowerCase();
+
+    /*
+     * ------------------------------------------------------------
+     * HIGH RISK / FAKE
+     * ------------------------------------------------------------
+     */
+    if (
+        prediction === "fake"
+    ) {
+        /*
+         * Update the visible live UI immediately.
+         *
+         * This uses the EXISTING UI functions.
+         * No HTML structure changes are required.
+         */
+        updateLiveThreatDisplay({
+            prediction: "fake",
+            fake_score:
+                stableResult.fakeScore,
+            risk_score:
+                stableResult.riskScore,
+            stable: true
+        });
+
+        /*
+         * Send ONLY ONE high-risk notification per call.
+         *
+         * Do not spam the user for every subsequent chunk.
+         */
+        if (
+            !liveHighRiskNotificationSent &&
+            liveNotificationSource
+        ) {
+            liveHighRiskNotificationSent = true;
+
+            try {
+                await publishStableLiveNotification(
+                    stableResult,
+                    "HIGH",
+                    "BLOCK"
+                );
+            } catch (error) {
+                /*
+                 * Notification failure must NEVER stop
+                 * the voice-analysis pipeline.
+                 */
+                liveHighRiskNotificationSent = false;
+
+                console.warn(
+                    "Real-time high-risk notification failed:",
+                    error
+                );
+            }
+        }
+
+        return;
+    }
+
+    /*
+     * ------------------------------------------------------------
+     * SUSPICIOUS
+     * ------------------------------------------------------------
+     */
+    if (
+        prediction === "suspicious"
+    ) {
+        /*
+         * Keep the UI cautious.
+         *
+         * We do NOT mark the call as REAL.
+         */
+        if (predictionBadge) {
+            predictionBadge.textContent =
+                "⚡ SUSPICIOUS AUDIO";
+        }
+
+        if (predictionText) {
+            predictionText.textContent =
+                "Suspicious audio detected";
+        }
+
+        if (predictionDescription) {
+            predictionDescription.textContent =
+                "Inconsistent voice signals detected. VoiceShield is continuing to collect evidence.";
+        }
+
+        if (riskLevel) {
+            riskLevel.textContent =
+                "SUSPICIOUS";
+        }
+
+        if (riskAction) {
+            riskAction.textContent =
+                "EXERCISE CAUTION";
+        }
+
+        /*
+         * Do NOT turn the application red for merely
+         * suspicious evidence.
+         */
+        document.body.classList.remove(
+            "security-danger"
+        );
+
+        /*
+         * A suspicious notification is optional.
+         *
+         * We send it only once if the existing notification
+         * pipeline is available.
+         */
+        if (
+            !liveSuspiciousNotificationSent &&
+            liveNotificationSource
+        ) {
+            liveSuspiciousNotificationSent = true;
+
+            try {
+                await publishStableLiveNotification(
+                    stableResult,
+                    "MEDIUM",
+                    "CAUTION"
+                );
+            } catch (error) {
+                liveSuspiciousNotificationSent = false;
+
+                console.warn(
+                    "Suspicious live notification failed:",
+                    error
+                );
+            }
+        }
+
+        return;
+    }
+
+    /*
+     * ------------------------------------------------------------
+     * REAL
+     * ------------------------------------------------------------
+     *
+     * Do NOT send a "safe" notification.
+     *
+     * Real-time REAL means:
+     *
+     * "No strong synthetic evidence in the latest window."
+     *
+     * It should not be interpreted as proof of identity.
+     */
+    if (
+        prediction === "real"
+    ) {
+        updateLiveThreatDisplay({
+            prediction: "real",
+            fake_score:
+                stableResult.fakeScore,
+            risk_score:
+                stableResult.riskScore,
+            stable: true
+        });
+    }
+}
 function renderLiveChunkResult(event) {
     /*
      * Frontend-owned chunk number.
@@ -4687,7 +5253,28 @@ function renderLiveChunkResult(event) {
      * ------------------------------------------------------------
      */
     const stableResult = calculateStableLiveResult(event);
-
+    /*
+    * Process the current rolling 4-chunk security state.
+    *
+    * This runs DURING the call.
+    */
+    if (
+        stableResult &&
+        stableResult.stable === true
+    ) {
+        handleLiveSecurityState(
+            stableResult
+        ).catch(error => {
+            /*
+            * A notification/UI failure must never
+            * terminate audio analysis.
+            */
+            console.warn(
+                "Live security-state handler failed:",
+                error
+            );
+        });
+    }
     /*
      * ============================================================
      * FINAL STABLE SECURITY DECISION
@@ -4898,13 +5485,13 @@ function updateLiveThreatDisplay(event, stableResult) {
         if (predictionBadge) {
             predictionBadge.innerHTML = `
                 <div class="live-analysis-loader">
-                    <span class="loader" aria-hidden="true"></span>
+                    <div class="matrix-loader" aria-hidden="true"></div>
                     <div class="live-analysis-label">ANALYZING VOICE</div>
                 </div>
             `;
 
             predictionBadge.className =
-                "prediction-badge live";
+                "prediction-badge live live-analyzing";
         }
 
 
@@ -5020,6 +5607,9 @@ function updateLiveThreatDisplay(event, stableResult) {
 
         if (predictionBadge) {
 
+            predictionBadge.className =
+                "prediction-badge";
+
             predictionBadge.textContent =
                 "SYNTHETIC VOICE CONFIRMED";
 
@@ -5092,9 +5682,14 @@ function updateLiveThreatDisplay(event, stableResult) {
         if (resultTag) {
             resultTag.textContent = "LIVE • FINAL";
         }
-
-        liveDecisionMade = true;
-
+        /*
+        * IMPORTANT:
+        * This is a LIVE security state, not the final
+        * call-level decision.
+        *
+        * Do NOT set:
+        * liveDecisionMade = true;
+        */
         publishStableLiveNotification(
             stableResult,
             "HIGH",
@@ -5175,6 +5770,9 @@ function updateLiveThreatDisplay(event, stableResult) {
 
         if (predictionBadge) {
 
+            predictionBadge.className =
+                "prediction-badge";
+
             predictionBadge.textContent =
                 "VOICE VERIFIED";
 
@@ -5246,7 +5844,6 @@ function updateLiveThreatDisplay(event, stableResult) {
             resultTag.textContent = "LIVE • FINAL";
         }
 
-        liveDecisionMade = true;
 
         publishStableLiveNotification(
             stableResult,
@@ -5500,6 +6097,14 @@ async function stopRealTimeMicrophone() {
 
     if (analyzeButton) {
         analyzeButton.classList.remove("hidden");
+    }
+
+    /*
+     * Finalize immediately when the user stops the live stream
+     * after all queued chunk analyses have already completed.
+     */
+    if (livePendingAnalyses === 0) {
+        finalizeLiveSecurityDecision();
     }
 
     console.log(

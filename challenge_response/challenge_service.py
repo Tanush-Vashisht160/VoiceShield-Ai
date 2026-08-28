@@ -92,10 +92,6 @@ class ChallengeService:
         challenge_passed = bool(phrase_result.get("passed"))
         challenge_confidence = float(phrase_result.get("confidence", 0.0))
 
-        if self.speaker_verifier is not None and speaker_verified is None and transcript:
-            speaker_verified = True
-            speaker_confidence = 0.95
-
         voice_authentic = None
         voice_confidence = None
         if voice_prediction is not None:
@@ -122,7 +118,11 @@ class ChallengeService:
             recommendation = "Do not proceed with the call."
             reasons = ["The response audio appears synthetic or manipulated."]
             risk_score = 95.0
-        elif challenge_passed and (speaker_verified is not False) and (voice_authentic is not False):
+        elif (
+            challenge_passed is True
+            and speaker_verified is True
+            and voice_authentic is True
+        ):
             final_status = "AUTHENTICATED"
             recommendation = "Safe to proceed"
             reasons = ["Challenge, speaker, and voice authenticity checks were consistent."]
