@@ -1,5 +1,8 @@
 (function () {
     const API_BASE = window.location.origin;
+    let challengeTranscript = "";
+    let speechRecognition = null;
+
     const state = {
         active: false,
         challengeId: null,
@@ -17,6 +20,71 @@
         enabled: true,
         riskThreshold: 0.4,
     };
+
+    function startChallengeSpeechRecognition() {
+        const SpeechRecognition =
+            window.SpeechRecognition ||
+            window.webkitSpeechRecognition;
+
+        if (!SpeechRecognition) {
+            console.warn(
+                "Speech Recognition API is not supported."
+            );
+            speechRecognition = null;
+            return;
+        }
+
+        speechRecognition = new SpeechRecognition();
+        speechRecognition.continuous = true;
+        speechRecognition.interimResults = true;
+        speechRecognition.lang = "en-US";
+
+        challengeTranscript = "";
+
+        speechRecognition.onresult = (event) => {
+            let transcript = "";
+
+            for (
+                let i = event.resultIndex;
+                i < event.results.length;
+                i++
+            ) {
+                transcript +=
+                    event.results[i][0].transcript + " ";
+            }
+
+            challengeTranscript = transcript.trim();
+
+            console.log(
+                "CHALLENGE TRANSCRIPT:",
+                challengeTranscript
+            );
+        };
+
+        speechRecognition.onerror = (event) => {
+            console.warn(
+                "Challenge speech recognition error:",
+                event.error
+            );
+        };
+
+        speechRecognition.start();
+    }
+
+    function stopChallengeSpeechRecognition() {
+        if (!speechRecognition) {
+            return;
+        }
+
+        try {
+            speechRecognition.stop();
+        } catch (error) {
+            console.warn(
+                "Speech recognition stop error:",
+                error
+            );
+        }
+    }
 
     function getChallengeHost() {
         return document.getElementById("challenge-response-host");
@@ -72,11 +140,23 @@
 
     function attachChallengeEvents() {
         const host = ensureChallengeMarkup();
-        if (!host || host.dataset.bound === "true") return;
+
+        if (!host) {
+            console.error("❌ Challenge markup could not be created");
+            return;
+        }
+
+        if (host.dataset.bound === "true") {
+            return;
+        }
+
         host.dataset.bound = "true";
 
-        const startButton = document.getElementById("challenge-start-button");
-        const resetButton = document.getElementById("challenge-reset-button");
+        const startButton =
+            document.getElementById("challenge-start-button");
+
+        const resetButton =
+            document.getElementById("challenge-reset-button");
 
         startButton?.addEventListener("click", () => {
             startChallengeVerification();
@@ -87,12 +167,13 @@
         });
     }
 
-    function updateChallengeInstruction(message) {
-        const element = document.getElementById("challenge-instruction");
-        if (element) {
-            element.textContent = message;
+        window.attachChallengeEvents = attachChallengeEvents;
+        function updateChallengeInstruction(message) {
+            const element = document.getElementById("challenge-instruction");
+            if (element) {
+                element.textContent = message;
+            }
         }
-    }
 
     function updateChallengeStatus(message, type = "info") {
         const element = document.getElementById("challenge-status");
@@ -131,6 +212,7 @@
     }
 
     function resetChallengeSession() {
+        stopChallengeSpeechRecognition();
         state.active = false;
         state.challengeId = null;
         state.challengePhrase = "";
@@ -140,7 +222,7 @@
         state.maxAttempts = 3;
 
         if (state.timer) {
-            clearInterval(state.timer);
+            clearTimeout(state.timer);
             state.timer = null;
         }
 
@@ -171,95 +253,350 @@
     }
 
     async function startChallengeVerification() {
+
         if (!challengeConfig.enabled) {
-            updateChallengeStatus("Challenge verification is disabled.", "warning");
+
+            updateChallengeStatus(
+                "Challenge verification is disabled.",
+                "warning"
+            );
+
             return;
+
+        }
+
+        /*
+        * Prevent starting multiple challenges
+        */
+        if (state.active) {
+
+            console.warn(
+                "⚠️ Challenge is already active"
+            );
+
+            return;
+
         }
 
         try {
-            const response = await fetch(`${API_BASE}/api/challenge-response/start`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    session_id: "browser-session",
-                }),
-            });
+
+            console.log(
+                "🚀 Starting challenge session..."
+            );
+
+            updateChallengeStatus(
+                "Generating a verification challenge...",
+                "info"
+            );
+
+            const response =
+                await fetch(
+                    `${API_BASE}/api/challenge-response/start`,
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+
+                        body: JSON.stringify({
+                            session_id: "browser-session"
+                        })
+                    }
+                );
+
+            console.log(
+                "📡 Challenge start response:",
+                response.status
+            );
 
             if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText || "Unable to start challenge.");
+
+                const errorText =
+                    await response.text();
+
+                throw new Error(
+                    errorText ||
+                    "Unable to start challenge."
+                );
+
             }
 
-            const data = await response.json();
+            const data =
+                await response.json();
+
+            console.log(
+                "✅ Challenge received from backend:",
+                data
+            );
+
+            /*
+            * Store challenge information
+            */
             state.active = true;
-            state.challengeId = data.challenge_id;
-            state.challengePhrase = data.challenge;
-            state.expiresAt = data.expires_at;
+
+            state.challengeId =
+                data.challenge_id;
+
+            state.challengePhrase =
+                data.challenge;
+
+            state.expiresAt =
+                data.expires_at;
+
             state.attemptCount = 0;
-            state.maxAttempts = data.max_attempts || 3;
 
-            setChallengePhrase(data.challenge);
-            updateChallengeInstruction("Please say the following phrase exactly:");
-            updateChallengeStatus("Challenge ready. Listening for the caller response...", "info");
+            state.maxAttempts =
+                data.max_attempts || 3;
 
-            const resetButton = document.getElementById("challenge-reset-button");
-            if (resetButton) resetButton.classList.remove("hidden");
+            /*
+            * Show phrase
+            */
+            setChallengePhrase(
+                data.challenge
+            );
 
+            updateChallengeInstruction(
+                "Please say the following phrase clearly:"
+            );
+
+            updateChallengeStatus(
+                "Challenge ready. Starting microphone...",
+                "info"
+            );
+
+            const resetButton =
+                document.getElementById(
+                    "challenge-reset-button"
+                );
+
+            if (resetButton) {
+
+                resetButton.classList.remove(
+                    "hidden"
+                );
+
+            }
+
+            /*
+            * Start microphone and recording
+            */
             await beginListeningForChallengeResponse();
+
         } catch (error) {
-            console.error("Challenge start failed:", error);
-            showChallengeError(error.message || "The challenge could not be started.");
+
+            console.error(
+                "❌ Challenge start failed:",
+                error
+            );
+
+            state.active = false;
+
+            showChallengeError(
+                error.message ||
+                "The challenge could not be started."
+            );
+
         }
+
     }
 
     async function beginListeningForChallengeResponse() {
-        const startButton = document.getElementById("challenge-start-button");
-        if (startButton) startButton.disabled = true;
+
+        const startButton =
+            document.getElementById("challenge-start-button");
+
+        if (startButton) {
+            startButton.disabled = true;
+        }
+
+        /*
+        * Clear any old transcript before starting
+        */
+        challengeTranscript = "";
 
         try {
-            state.stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    channelCount: 1,
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true,
-                },
-            });
 
-            state.recorder = new MediaRecorder(state.stream);
+            console.log("🎤 Requesting microphone for challenge...");
+
+            state.stream =
+                await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+
+            console.log("✅ Challenge microphone access granted");
+
+            state.recorder =
+                new MediaRecorder(state.stream);
+
             state.mediaChunks = [];
 
+            /*
+            * Collect recorded audio chunks
+            */
             state.recorder.ondataavailable = (event) => {
-                if (event.data && event.data.size > 0) {
+
+                if (
+                    event.data &&
+                    event.data.size > 0
+                ) {
+
                     state.mediaChunks.push(event.data);
+
                 }
+
             };
 
+            /*
+            * When recording stops, send audio to backend
+            */
             state.recorder.onstop = async () => {
-                if (!state.challengeId || state.mediaChunks.length === 0) {
-                    updateChallengeStatus("No response audio was captured.", "warning");
-                    return;
+
+                console.log(
+                    "🛑 Challenge recording stopped"
+                );
+
+                /*
+                * Clear recording timer
+                */
+                if (state.timer) {
+
+                    clearTimeout(state.timer);
+
+                    state.timer = null;
+
                 }
 
-                const blob = new Blob(state.mediaChunks, { type: "audio/webm" });
+                /*
+                * Stop microphone tracks
+                */
+                if (state.stream) {
+
+                    state.stream
+                        .getTracks()
+                        .forEach((track) => track.stop());
+
+                    state.stream = null;
+
+                }
+
+                /*
+                * Check audio was captured
+                */
+                if (
+                    !state.challengeId ||
+                    state.mediaChunks.length === 0
+                ) {
+
+                    console.warn(
+                        "⚠️ No challenge audio captured"
+                    );
+
+                    updateChallengeStatus(
+                        "No response audio was captured. Please try again.",
+                        "warning"
+                    );
+
+                    if (startButton) {
+                        startButton.disabled = false;
+                    }
+
+                    return;
+
+                }
+
+                const blob =
+                    new Blob(
+                        state.mediaChunks,
+                        {
+                            type:
+                                state.mediaChunks[0]?.type ||
+                                "audio/webm"
+                        }
+                    );
+
+                console.log(
+                    "📤 Challenge audio captured:",
+                    blob.size,
+                    "bytes"
+                );
+
+                updateChallengeStatus(
+                    "Verifying your spoken response...",
+                    "info"
+                );
+
                 await submitChallengeResponse(blob);
+
             };
 
+            /*
+            * Start recording
+            */
             state.recorder.start();
-            updateChallengeStatus("Listening for the spoken response...", "info");
+            console.log("🎬 Challenge recording started");
 
-            const timeoutMs = 15000;
-            state.timer = window.setTimeout(() => {
-                if (state.recorder && state.recorder.state === "recording") {
-                    state.recorder.stop();
-                }
-                updateChallengeStatus("Challenge response timed out.", "warning");
-                showChallengeError("Challenge response timed out. Please try again.");
-            }, timeoutMs);
+
+            /*
+            * Start browser speech recognition if available
+            */
+            startChallengeSpeechRecognition();
+
+            updateChallengeStatus(
+                "🎤 Listening... Please speak the displayed phrase clearly.",
+                "info"
+            );
+
+            /*
+            * Record for 8 seconds, then automatically verify.
+            */
+            const recordingDurationMs = 8000;
+
+            state.timer =
+                window.setTimeout(() => {
+
+                    if (
+                        state.recorder &&
+                        state.recorder.state === "recording"
+                    ) {
+
+                        console.log(
+                            "⏱️ Challenge recording complete. Verifying..."
+                        );
+
+                        state.recorder.stop();
+
+                    }
+
+                }, recordingDurationMs);
+
         } catch (error) {
-            console.error("Challenge microphone failed:", error);
-            showChallengeError("Microphone access is required for challenge verification.");
+
+            console.error(
+                "❌ Challenge microphone failed:",
+                error
+            );
+
+            updateChallengeStatus(
+                "Microphone access failed. Please allow microphone permission.",
+                "error"
+            );
+
+            if (startButton) {
+                startButton.disabled = false;
+            }
+
+            showChallengeError(
+                "Microphone access is required for challenge verification."
+            );
+
         }
+
     }
 
     async function submitChallengeResponse(blob) {
@@ -270,7 +607,8 @@
 
         const formData = new FormData();
         formData.append("challenge_id", state.challengeId);
-        formData.append("audio", blob, "challenge_response.webm");
+        formData.append("audio", blob, "challenge-response.webm");
+        formData.append("transcript", challengeTranscript);
 
         try {
             updateChallengeStatus("Verifying the challenge response...", "info");
@@ -340,7 +678,7 @@
         if (resetButton) resetButton.classList.remove("hidden");
 
         if (state.timer) {
-            clearInterval(state.timer);
+            clearTimeout(state.timer);
             state.timer = null;
         }
 
@@ -358,7 +696,7 @@
         setChallengeVisibility(true);
         host?.scrollIntoView({
             behavior: "smooth",
-            block: "nearest"
+            block: "nearest",
         });
     }
 

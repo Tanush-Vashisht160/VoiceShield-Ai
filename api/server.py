@@ -11,14 +11,23 @@ from fastapi.staticfiles import StaticFiles
 
 from app.firewall import VoiceSecurityFirewall
 from fastapi.responses import StreamingResponse
-from fastapi import Body, FastAPI, File, Form, UploadFile, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    File,
+    Body,
+    UploadFile,
+    HTTPException,
+    WebSocket,
+    WebSocketDisconnect,
+    Form,
+)
 import asyncio
 import wave
-
+from pydantic import BaseModel
 from api.call_simulator import CallSimulator
 from app.realtime_engine import RealtimeDetectionEngine
 from app.transcription_service import transcribe_audio
-from challenge_response import ChallengeService
+from challenge_response.challenge_service import ChallengeService
 from notifications import NotificationManager
 # ============================================================
 # PATHS
@@ -34,7 +43,8 @@ INDEX_FILE = FRONTEND_DIR / "index.html"
 CSS_DIR = FRONTEND_DIR / "css"
 JS_DIR = FRONTEND_DIR / "js"
 
-
+class ChallengeStartRequest(BaseModel):
+    session_id: str = "browser-session"
 # ============================================================
 # FASTAPI APP
 # ============================================================
@@ -163,7 +173,6 @@ def startup_event():
     print("VoiceShield AI API READY")
     print("=" * 70)
 
-
 # ============================================================
 # FRONTEND ROUTE
 # ============================================================
@@ -212,14 +221,33 @@ def get_notifications(
     }
 
 
-@app.post("/api/challenge-response/start")
-def start_challenge_response():
-    """Create a fresh challenge for additional verification."""
+# ============================================================
+# CHALLENGE RESPONSE — START
+# ============================================================
 
-    service = getattr(firewall, "challenge_service", challenge_service)
+@app.post("/api/challenge-response/start")
+def start_challenge_response(request: ChallengeStartRequest):
+
+    if firewall is None:
+        raise HTTPException(
+            status_code=503,
+            detail="VoiceShield AI is still initializing.",
+        )
+
+    service = firewall.challenge_service
+
     challenge = service.start_challenge()
 
+    print("\n" + "=" * 60)
+    print("CHALLENGE RESPONSE STARTED")
+    print("=" * 60)
+    print("Session ID  :", request.session_id)
+    print("Challenge ID:", challenge["challenge_id"])
+    print("Challenge   :", challenge["phrase"])
+    print("=" * 60 + "\n")
+
     return {
+        "success": True,
         "challenge_id": challenge["challenge_id"],
         "challenge": challenge["phrase"],
         "expires_at": challenge["expires_at"].isoformat(),
@@ -227,88 +255,287 @@ def start_challenge_response():
     }
 
 
+# ============================================================
+# CHALLENGE RESPONSE — VERIFY
+# ============================================================
+
 @app.post("/api/challenge-response/verify")
 async def verify_challenge_response(
-    challenge_id: str = Form(...),
-    audio: UploadFile = File(...),
-):
-    """Verify a spoken challenge response against the challenge phrase and current risk signals."""
 
-    service = getattr(firewall, "challenge_service", challenge_service)
+    challenge_id: str = Form(...),
+
+    transcript: str = Form(""),
+
+    audio: UploadFile = File(...),
+
+):
+    """
+    Verify the challenge response.
+
+    The browser records the user's spoken challenge.
+    The backend:
+
+    1. Finds the existing challenge session
+    2. Converts the recorded audio
+    3. Transcribes the actual audio
+    4. Runs voice authenticity detection
+    5. Checks whether the spoken phrase matches
+    """
+
+    if firewall is None:
+
+        raise HTTPException(
+            status_code=503,
+            detail="VoiceShield AI is still initializing.",
+        )
 
     if not challenge_id:
-        raise HTTPException(status_code=400, detail="Missing challenge session identifier.")
+
+        raise HTTPException(
+            status_code=400,
+            detail="Missing challenge session identifier.",
+        )
+
+    # IMPORTANT:
+    # Use EXACTLY the same ChallengeService instance
+    # that created the challenge.
+    service = firewall.challenge_service
 
     session = service.get_session(challenge_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Challenge session not found.")
 
-    if not audio or not audio.filename:
-        raise HTTPException(status_code=400, detail="No audio response was provided.")
+    if session is None:
+
+        print(
+            "❌ Challenge session not found:",
+            challenge_id
+        )
+
+        raise HTTPException(
+            status_code=404,
+            detail=f"Challenge session not found: {challenge_id}",
+        )
+
+    if audio is None:
+
+        raise HTTPException(
+            status_code=400,
+            detail="No audio response was provided.",
+        )
 
     content = await audio.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="Challenge response audio was empty.")
 
-    extension = Path(audio.filename).suffix.lower() or ".webm"
+    if not content:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Challenge response audio was empty.",
+        )
+
+    print("\n" + "=" * 60)
+    print("CHALLENGE RESPONSE VERIFICATION")
+    print("=" * 60)
+    print("Challenge ID :", challenge_id)
+    print("Audio size   :", len(content), "bytes")
+    print("Filename     :", audio.filename)
+    print("=" * 60)
+
+    extension = (
+        Path(audio.filename).suffix.lower()
+        or ".webm"
+    )
+
     temp_path = None
     converted_path = None
 
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as temp_file:
-            temp_file.write(content)
-            temp_path = Path(temp_file.name)
 
-        if extension in {".webm", ".m4a", ".aac", ".opus", ".oga"}:
-            converted_path = convert_audio_to_wav(temp_path)
+        # ----------------------------------------------------
+        # SAVE RECORDED AUDIO
+        # ----------------------------------------------------
+
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=extension,
+        ) as temp_file:
+
+            temp_file.write(content)
+
+            temp_path = Path(
+                temp_file.name
+            )
+
+        # ----------------------------------------------------
+        # CONVERT BROWSER AUDIO TO WAV
+        # ----------------------------------------------------
+
+        if extension in {
+            ".webm",
+            ".m4a",
+            ".aac",
+            ".opus",
+            ".oga",
+        }:
+
+            converted_path = convert_audio_to_wav(
+                temp_path
+            )
+
             analysis_path = converted_path
+
         else:
+
             analysis_path = temp_path
 
-        voice_result = None
-        if firewall is not None and hasattr(firewall, "detector"):
-            voice_result = firewall.detector.predict(analysis_path)
+        print(
+            "Audio ready for analysis:",
+            analysis_path
+        )
+
+        # ----------------------------------------------------
+        # TRANSCRIBE THE ACTUAL RECORDED AUDIO
+        # ----------------------------------------------------
 
         transcription = await asyncio.to_thread(
+
             transcribe_audio,
+
             content,
+
             audio.filename,
+
             audio.content_type or "audio/webm",
+
         )
-        transcript_text = str(transcription.get("transcript", "") or "").strip()
 
-        if voice_result is None:
-            result = service.verify_response(
-                challenge_id=challenge_id,
-                transcript=transcript_text,
-                verification_error="Voice authenticity service unavailable for challenge verification.",
+        transcript_text = str(
+            transcription.get(
+                "transcript",
+                ""
             )
-        else:
-            result = service.verify_response(
-                challenge_id=challenge_id,
-                transcript=transcript_text,
-                voice_prediction=str(voice_result.get("prediction", "")).lower(),
-                voice_fake_score=float(voice_result.get("fake_score", 0.0) or 0.0),
-                speaker_verified=None,
-                speaker_confidence=None,
+            or ""
+        ).strip()
+
+        print(
+            "ACTUAL AUDIO TRANSCRIPT:",
+            transcript_text
+        )
+
+        # ----------------------------------------------------
+        # VOICE AUTHENTICITY DETECTION
+        # ----------------------------------------------------
+
+        voice_prediction = None
+        voice_fake_score = 0.0
+
+        if (
+            firewall is not None
+            and hasattr(firewall, "detector")
+            and firewall.detector is not None
+        ):
+
+            voice_result = firewall.detector.predict(
+                analysis_path
             )
 
-        return result.to_dict()
+            print(
+                "VOICE DETECTION RESULT:",
+                voice_result
+            )
+
+            voice_prediction = str(
+                voice_result.get(
+                    "prediction",
+                    ""
+                )
+            ).lower()
+
+            voice_fake_score = float(
+                voice_result.get(
+                    "fake_score",
+                    0.0
+                )
+                or 0.0
+            )
+
+        # ----------------------------------------------------
+        # VERIFY CHALLENGE
+        # ----------------------------------------------------
+
+        result = service.verify_response(
+
+            challenge_id=challenge_id,
+
+            transcript=transcript_text,
+
+            voice_prediction=voice_prediction,
+
+            voice_fake_score=voice_fake_score,
+
+            speaker_verified=None,
+
+            speaker_confidence=None,
+
+        )
+
+        response = result.to_dict()
+
+        print("\nFINAL CHALLENGE RESULT")
+        print("Status     :", response.get("final_status"))
+        print("Risk Score :", response.get("risk_score"))
+        print("Transcript :", transcript_text)
+        print("=" * 60 + "\n")
+
+        return response
+
+    except HTTPException:
+
+        raise
 
     except Exception as exc:
-        result = service.verify_response(
-            challenge_id=challenge_id,
-            transcript="",
-            verification_error=str(exc),
+
+        print(
+            "❌ Challenge verification error:",
+            repr(exc)
         )
-        return result.to_dict()
+
+        try:
+
+            result = service.verify_response(
+
+                challenge_id=challenge_id,
+
+                transcript="",
+
+                verification_error=str(exc),
+
+            )
+
+            return result.to_dict()
+
+        except Exception:
+
+            raise HTTPException(
+                status_code=500,
+                detail=f"Challenge verification failed: {exc}",
+            )
 
     finally:
-        for path in (temp_path, converted_path):
+
+        for path in (
+            temp_path,
+            converted_path,
+        ):
+
             if path is not None:
+
                 try:
-                    path.unlink(missing_ok=True)
+
+                    path.unlink(
+                        missing_ok=True
+                    )
+
                 except Exception:
+
                     pass
 
 

@@ -4292,9 +4292,13 @@ function handleLiveAnalysisEvent(event) {
 }
 
 function finalizeLiveSecurityDecision() {
+    const observations =
+        Array.isArray(liveAllPredictionHistory)
+            ? liveAllPredictionHistory
+            : [];    
 
     if (
-        liveAllPredictionHistory.length === 0
+        observations.length === 0
     ) {
         console.warn(
             "Cannot finalize live security decision: no processed chunks."
@@ -4316,7 +4320,7 @@ function finalizeLiveSecurityDecision() {
                 prediction: liveStablePrediction,
                 fakeScore: liveStableFakeScore,
                 riskScore: liveStableRiskScore,
-                evidenceCount: livePredictionHistory.length,
+                evidenceCount: observations.length,
                 requiredCount: LIVE_STABLE_REQUIRED
             },
             completionLabel
@@ -4486,6 +4490,47 @@ function finalizeLiveSecurityDecision() {
     if (liveCallStatus) {
         liveCallStatus.textContent = "CALL ANALYSIS COMPLETE";
     }
+
+    /*
+    * ============================================================
+    * CHALLENGE RESPONSE FOR FINAL LIVE CALL RESULT
+    * ============================================================
+    */
+
+    if (
+        prediction === "fake" ||
+        prediction === "suspicious"
+    ) {
+
+        console.log("🚨 FINAL LIVE RESULT REQUIRES CHALLENGE RESPONSE");
+
+        console.log({
+            prediction: prediction,
+            riskScore: stableResult.riskScore,
+            source: "live-call-final"
+        });
+
+        window.dispatchEvent(
+            new CustomEvent(
+                "voiceshield:challenge-show",
+                {
+                    detail: {
+                        prediction: prediction,
+                        riskScore: stableResult.riskScore,
+                        fakeScore: stableResult.fakeScore,
+                        source: "live-call-final"
+                    }
+                }
+            )
+        );
+
+    } else {
+
+        console.log(
+            "✅ FINAL LIVE RESULT IS REAL - NO CHALLENGE REQUIRED"
+        );
+    }
+
     liveDecisionMade = true;
 }
 function showLiveCompletionSummary(
@@ -4498,8 +4543,16 @@ function showLiveCompletionSummary(
 
     const isFake = normalizedPrediction === "fake";
     const isReal = normalizedPrediction === "real";
+    const riskScore = Number(
+        stableResult?.riskScore ??
+        stableResult?.risk?.score ??
+        0
+    );
+
     const isSuspicious =
-        !isFake && !isReal;
+        isFake ||
+        riskScore >= 40 ||
+        (!isFake && !isReal);
 
     /*
      * ------------------------------------------------------------
@@ -4680,23 +4733,36 @@ function showLiveCompletionSummary(
         completionLabel: "TEST COMPLETED"
     });
 
-    /*
-     * ------------------------------------------------------------
-     * OPTIONAL ADDITIONAL VERIFICATION
-     * ------------------------------------------------------------
-     * Only suspicious/inconclusive calls should expose the
-     * challenge-response panel.
-     */
+    /* ------------------------------------------------------------
+    OPTIONAL ADDITIONAL VERIFICATION
+    ------------------------------------------------------------ */
+
+    console.log("========================================");
+    console.log("🚨 CHALLENGE CHECK");
+    console.log("Prediction:", normalizedPrediction);
+    console.log("Risk Score:", riskScore);
+    console.log("Is Fake:", isFake);
+    console.log("Is Real:", isReal);
+    console.log("Is Suspicious:", isSuspicious);
+    console.log("========================================");
+
     if (isSuspicious) {
+        console.log("🚨 DISPATCHING CHALLENGE EVENT");
+
         window.dispatchEvent(
             new CustomEvent("voiceshield:challenge-show", {
                 detail: {
-                    riskScore: Number(stableResult?.riskScore || 0),
-                    prediction: normalizedPrediction
+                    riskScore: riskScore,
+                    prediction: normalizedPrediction,
+                    isFake: isFake,
+                    isSuspicious: isSuspicious
                 }
             })
         );
+    } else {
+        console.log("✅ CHALLENGE NOT REQUIRED");
     }
+
 
     /*
      * ------------------------------------------------------------
@@ -5022,9 +5088,12 @@ function calculateStableLiveResult(event) {
  *
  * It warns the user while the call is still happening.
  */
-async function handleLiveSecurityState(
-    stableResult
-) {
+async function handleLiveSecurityState(stableResult) {
+
+    console.log("🔍 ACTUAL STABLE RESULT:", stableResult);
+    console.log("🔍 PREDICTION:", stableResult?.prediction);
+    console.log("🔍 RISK SCORE:", stableResult?.riskScore);
+
     if (
         !stableResult ||
         !stableResult.stable
@@ -5059,7 +5128,20 @@ async function handleLiveSecurityState(
                 stableResult.riskScore,
             stable: true
         });
+        console.log("🚨 LIVE CALL: FAKE DETECTED");
+        console.log("🚨 FAKE LIVE AUDIO DETECTED");
+        console.log("🚨 OPENING CHALLENGE RESPONSE");
 
+        window.dispatchEvent(
+            new CustomEvent("voiceshield:challenge-show", {
+                detail: {
+                    prediction: prediction,
+                    riskScore: stableResult.riskScore,
+                    fakeScore: stableResult.fakeScore,
+                    source: "live-call"
+                }
+            })
+        );
         /*
          * Send ONLY ONE high-risk notification per call.
          *
@@ -5099,9 +5181,9 @@ async function handleLiveSecurityState(
      * SUSPICIOUS
      * ------------------------------------------------------------
      */
-    if (
-        prediction === "suspicious"
-    ) {
+    if (prediction === "suspicious") {
+        console.log("⚡ LIVE CALL: SUSPICIOUS AUDIO DETECTED");
+
         /*
          * Keep the UI cautious.
          *
@@ -6534,13 +6616,40 @@ checkSystemHealth();
 
 /* ============================================================
    CHALLENGE RESPONSE EVENT LISTENER
-============================================================ */
+   ============================================================ */
 
-window.addEventListener("voiceshield:challenge-required", (event) => {
-    if (window.attachChallengeEvents && typeof window.attachChallengeEvents === "function") {
-        window.attachChallengeEvents();
+window.addEventListener(
+    "voiceshield:challenge-show",
+    (event) => {
+
+        console.log(
+            "🚨 CHALLENGE EVENT RECEIVED:",
+            event.detail
+        );
+
+        const host = ensureChallengeMarkup();
+
+        if (!host) {
+            console.error(
+                "❌ Challenge markup could not be created"
+            );
+            return;
+        }
+
+        attachChallengeEvents();
+
+        host.classList.remove("hidden");
+
+        console.log(
+            "✅ CHALLENGE RESPONSE SHOULD NOW BE VISIBLE"
+        );
+
+        host.scrollIntoView({
+            behavior: "smooth",
+            block: "center"
+        });
     }
-});
+);
 
 
 /* ============================================================
@@ -7004,3 +7113,51 @@ window.addEventListener("voiceshield:challenge-required", (event) => {
     drawIdleWave();
 
 })();
+
+/* ============================================================
+   SHOW CHALLENGE RESPONSE
+   ============================================================ */
+
+function triggerChallengeResponse(prediction, riskScore, source = "analysis") {
+
+    const normalizedPrediction = String(
+        prediction || ""
+    ).toLowerCase();
+
+    const numericRiskScore = Number(riskScore) || 0;
+
+    const isFake =
+        normalizedPrediction === "fake";
+
+    const isSuspicious =
+        normalizedPrediction === "suspicious" ||
+        normalizedPrediction === "unknown" ||
+        isFake ||
+        numericRiskScore >= 40;
+
+    console.log("========================================");
+    console.log("🚨 CHALLENGE RESPONSE CHECK");
+    console.log("Source:", source);
+    console.log("Prediction:", normalizedPrediction);
+    console.log("Risk Score:", numericRiskScore);
+    console.log("Is Fake:", isFake);
+    console.log("Is Suspicious:", isSuspicious);
+    console.log("========================================");
+
+    if (!isSuspicious) {
+        console.log("✅ Challenge Response not required");
+        return;
+    }
+
+    console.log("🚨 TRIGGERING CHALLENGE RESPONSE");
+
+    window.dispatchEvent(
+        new CustomEvent("voiceshield:challenge-show", {
+            detail: {
+                prediction: normalizedPrediction,
+                riskScore: numericRiskScore,
+                source: source
+            }
+        })
+    );
+}
