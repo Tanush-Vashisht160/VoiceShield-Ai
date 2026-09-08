@@ -28,6 +28,12 @@ class ChallengeSession:
     challenge_verification_result: dict[str, Any] | None = None
     last_error: str | None = None
 
+    # Adaptive challenge fields
+    adaptive_challenge: dict[str, Any] | None = None
+    adaptive_answer: str | None = None
+    adaptive_follow_up_answer: str | None = None
+    adaptive_consistency_result: dict[str, Any] | None = None
+
     def mark_waiting_for_response(self) -> None:
         self.state = ChallengeSessionState.WAITING_FOR_RESPONSE
 
@@ -83,4 +89,8 @@ class ChallengeSession:
             "state": self.state.value,
             "response_transcript": self.response_transcript,
             "challenge_verification_result": self.challenge_verification_result,
+            "adaptive_challenge": self.adaptive_challenge,
+            "adaptive_answer": self.adaptive_answer,
+            "adaptive_follow_up_answer": self.adaptive_follow_up_answer,
+            "adaptive_consistency_result": self.adaptive_consistency_result,
         }

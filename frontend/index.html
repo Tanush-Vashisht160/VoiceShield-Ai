@@ -145,6 +145,63 @@
                         </button>
                     </div>
 
+                    <!-- TRUSTED SPEAKER REFERENCE -->
+                    <!-- TRUSTED SPEAKER REFERENCE -->
+                    <div
+                        id="reference-speaker-wrapper"
+                        class="reference-speaker-wrapper"
+                    >
+
+                        <input
+                            type="file"
+                            id="reference-audio-input"
+                            accept=".wav,.mp3,.flac,.ogg,.webm,.m4a,.aac,.opus,.oga,audio/*"
+                            hidden
+                        >
+
+                        <button
+                            id="reference-speaker-button"
+                            class="secondary-button"
+                            type="button"
+                        >
+                            <span>ADD TRUSTED SPEAKER VOICE</span>
+                            <span>+</span>
+                        </button>
+
+                        <div
+                            id="reference-file-preview"
+                            class="file-preview hidden"
+                        >
+
+                            <div class="file-icon">
+                                VOICE
+                            </div>
+
+                            <div class="file-info">
+
+                                <strong id="reference-file-name">
+                                    reference.wav
+                                </strong>
+
+                                <span id="reference-file-size">
+                                    0 MB
+                                </span>
+
+                            </div>
+
+                            <button
+                                id="remove-reference-file"
+                                class="icon-button"
+                                type="button"
+                                aria-label="Remove reference speaker"
+                            >
+                                ×
+                            </button>
+
+                        </div>
+
+                    </div>
+
                     <!-- ANALYZE BUTTON -->
                     <button
                         id="analyze-button"

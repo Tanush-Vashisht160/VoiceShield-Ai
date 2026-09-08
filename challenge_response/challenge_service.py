@@ -3,6 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from .adaptive_challenge import (
+    AdaptiveChallengeGenerator,
+    ResponseConsistencyEvaluator,
+)
 from .challenge_generator import ChallengeGenerator
 from .challenge_session import ChallengeSession
 from .models import ChallengeAuthenticationResult
@@ -27,6 +31,10 @@ class ChallengeService:
     ) -> None:
         self.challenge_generator = challenge_generator or ChallengeGenerator()
         self.phrase_verifier = phrase_verifier or ChallengePhraseVerifier()
+
+        self.adaptive_challenge_generator = AdaptiveChallengeGenerator()
+        self.response_consistency_evaluator = ResponseConsistencyEvaluator()
+
         self.risk_engine = risk_engine
         self.speaker_verifier = speaker_verifier
         self.detector = detector
@@ -53,7 +61,169 @@ class ChallengeService:
 
     def get_session(self, challenge_id: str) -> ChallengeSession | None:
         return self.sessions.get(challenge_id)
+    def start_adaptive_challenge(
+        self,
+        transcript: str,
+    ) -> dict[str, Any] | None:
+        """
+        Generate a challenge from a claim detected in the
+        current conversation.
 
+        Returns None when no suitable claim is detected.
+        """
+
+        adaptive_challenge = (
+            self.adaptive_challenge_generator.generate(
+                transcript
+            )
+        )
+
+        if adaptive_challenge is None:
+            return None
+
+        challenge = self.challenge_generator.generate()
+
+        session = ChallengeSession(
+            challenge_id=challenge["challenge_id"],
+            phrase=challenge["phrase"],
+            created_at=challenge["created_at"],
+            expires_at=challenge["expires_at"],
+            max_attempts=3,
+        )
+
+        session.adaptive_challenge = (
+            adaptive_challenge.to_dict()
+        )
+
+        session.mark_waiting_for_response()
+
+        self.sessions[
+            challenge["challenge_id"]
+        ] = session
+
+        return {
+            "challenge_id": challenge["challenge_id"],
+            "claim": adaptive_challenge.claim.to_dict(),
+            "question": adaptive_challenge.question,
+            "follow_up_question": (
+                adaptive_challenge.follow_up_question
+            ),
+            "challenge_type": (
+                adaptive_challenge.challenge_type
+            ),
+            "expires_at": challenge["expires_at"],
+            "max_attempts": 3,
+        }
+        def verify_adaptive_response(
+            self,
+            challenge_id: str,
+            answer: str,
+            follow_up_answer: str | None = None,
+            response_delay_seconds: float | None = None,
+        ) -> dict[str, Any]:
+            """
+            Evaluate an answer to an adaptive challenge.
+            """
+
+            session = self.get_session(challenge_id)
+
+            if session is None:
+                raise KeyError(
+                    f"Challenge session not found: {challenge_id}"
+                )
+
+            if session.is_expired():
+                session.mark_expired()
+
+                return {
+                    "challenge_id": challenge_id,
+                    "passed": False,
+                    "confidence": 0.0,
+                    "status": "REJECTED",
+                    "reason": "Adaptive challenge expired.",
+                }
+
+            adaptive_data = session.adaptive_challenge
+
+            if not adaptive_data:
+                raise ValueError(
+                    "This session does not contain an adaptive challenge."
+                )
+
+            claim_data = adaptive_data["claim"]
+
+            from .adaptive_challenge import Claim
+
+            claim = Claim(
+                text=claim_data["text"],
+                claim_type=claim_data["claim_type"],
+                subject=claim_data["subject"],
+                confidence=float(
+                    claim_data.get("confidence", 0.0)
+                ),
+            )
+
+            result = self.response_consistency_evaluator.evaluate(
+                claim=claim,
+                answer=answer,
+                follow_up_answer=follow_up_answer,
+            )
+
+            session.adaptive_answer = answer
+            session.adaptive_follow_up_answer = (
+                follow_up_answer
+            )
+            session.adaptive_consistency_result = (
+                result.to_dict()
+            )
+
+            # Optional timing signal.
+            timing_score = 1.0
+
+            if response_delay_seconds is not None:
+                if response_delay_seconds <= 3:
+                    timing_score = 1.0
+                elif response_delay_seconds <= 8:
+                    timing_score = 0.8
+                elif response_delay_seconds <= 15:
+                    timing_score = 0.6
+                else:
+                    timing_score = 0.4
+
+            final_confidence = (
+                result.confidence * 0.85
+                + timing_score * 0.15
+            )
+
+            final_confidence = max(
+                0.0,
+                min(1.0, final_confidence),
+            )
+
+            passed = final_confidence >= 0.65
+
+            if passed:
+                status = "CONSISTENT"
+            elif final_confidence >= 0.40:
+                status = "INCONCLUSIVE"
+            else:
+                status = "INCONSISTENT"
+
+            return {
+                "challenge_id": challenge_id,
+                "passed": passed,
+                "confidence": round(
+                    final_confidence,
+                    4,
+                ),
+                "status": status,
+                "timing_score": round(
+                    timing_score,
+                    4,
+                ),
+                "consistency": result.to_dict(),
+            }
+    
     def verify_response(
         self,
         challenge_id: str,

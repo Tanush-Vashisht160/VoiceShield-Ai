@@ -605,19 +605,13 @@ class DeepfakeDetector:
             )
 
             # [batch, hidden, 1]
-            pooled = self.pool(
-                embeddings
-            )
+            pooled = self.pool(embeddings)
 
             # [batch, hidden]
-            pooled = pooled.squeeze(
-                -1
-            )
+            pooled = pooled.squeeze( -1)
 
             # [batch, 2]
-            logits = self.classifier(
-                pooled
-            )
+            logits = self.classifier(pooled)
 
             probabilities = torch.softmax(
                 logits,

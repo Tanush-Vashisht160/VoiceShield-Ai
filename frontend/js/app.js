@@ -17,7 +17,14 @@ const filePreview = document.getElementById("file-preview");
 const fileName = document.getElementById("file-name");
 const fileSize = document.getElementById("file-size");
 const removeFile = document.getElementById("remove-file");
+const referenceAudioInput =document.getElementById("reference-audio-input");
 
+const referenceSpeakerButton =document.getElementById("reference-speaker-button");
+const referenceFilePreview =document.getElementById("reference-file-preview");
+const referenceFileName =document.getElementById("reference-file-name");
+const referenceFileSize =document.getElementById("reference-file-size");
+
+const removeReferenceFile =document.getElementById("remove-reference-file");
 const initialState = document.getElementById("initial-state");
 const loadingState = document.getElementById("loading-state");
 const resultState = document.getElementById("result-state");
@@ -37,9 +44,20 @@ const voiceResult = document.getElementById("voice-result");
 const fakeScore = document.getElementById("fake-score");
 const fakeScoreBar = document.getElementById("fake-score-bar");
 
-const speakerResult = document.getElementById("speaker-result");
-const speakerScore = document.getElementById("speaker-score");
-const speakerBar = document.getElementById("speaker-bar");
+const speakerIdentity =
+    document.getElementById(
+        "speaker-identity"
+    );
+
+const speakerVerification =
+    document.getElementById(
+        "speaker-verification"
+    );
+
+const speakerBar =
+    document.getElementById(
+        "speaker-bar"
+    );
 
 const contextResult = document.getElementById("context-result");
 const contextScore = document.getElementById("context-score");
@@ -201,7 +219,123 @@ if (audioInput) {
         }
 
     });
+    /* ============================================================
+    TRUSTED SPEAKER REFERENCE AUDIO
+    ============================================================ */
 
+    if (
+        referenceSpeakerButton &&
+        referenceAudioInput
+    ) {
+
+        referenceSpeakerButton.addEventListener(
+            "click",
+            () => {
+
+                referenceAudioInput.click();
+
+            }
+        );
+
+    }
+
+
+    if (referenceAudioInput) {
+
+        referenceAudioInput.addEventListener(
+            "change",
+            (event) => {
+
+                const file =
+                    event.target.files[0];
+
+                if (!file) {
+                    return;
+                }
+
+                if (!isSupportedAudioFile(file)) {
+
+                    showFrontendError(
+                        "Unsupported reference speaker audio format."
+                    );
+
+                    referenceAudioInput.value = "";
+
+                    return;
+                }
+
+                referenceFile = file;
+
+                if (referenceFileName) {
+
+                    referenceFileName.textContent =
+                        file.name;
+
+                }
+
+                if (referenceFileSize) {
+
+                    referenceFileSize.textContent =
+                        formatFileSize(file.size);
+
+                }
+
+                if (referenceFilePreview) {
+
+                    referenceFilePreview.classList.remove(
+                        "hidden"
+                    );
+
+                }
+
+                if (referenceSpeakerButton) {
+
+                    referenceSpeakerButton.classList.add(
+                        "hidden"
+                    );
+
+                }
+
+            }
+        );
+
+    }
+
+
+    if (removeReferenceFile) {
+
+        removeReferenceFile.addEventListener(
+            "click",
+            () => {
+
+                referenceFile = null;
+
+                if (referenceAudioInput) {
+
+                    referenceAudioInput.value = "";
+
+                }
+
+                if (referenceFilePreview) {
+
+                    referenceFilePreview.classList.add(
+                        "hidden"
+                    );
+
+                }
+
+                if (referenceSpeakerButton) {
+
+                    referenceSpeakerButton.classList.remove(
+                        "hidden"
+                    );
+
+                }
+
+            }
+        );
+
+    }
 }
 
 
@@ -606,7 +740,17 @@ async function analyzeAudio(
 
         return;
     }
+    if (
+        referenceFile &&
+        !isSupportedAudioFile(referenceFile)
+    ) {
 
+        showFrontendError(
+            "Unsupported reference speaker audio format."
+        );
+
+        return;
+    }
     const formData = new FormData();
     const uploadFile = getUploadableAudioFile(file);
 
@@ -826,64 +970,78 @@ function renderAnalysis(data) {
 
     }
 
+    /* ============================================================
+    SPEAKER VERIFICATION
+    ============================================================ */
 
-    /* Speaker Verification */
+    const speaker =
+        data.speaker_verification || null;
 
-    if (data.speaker_verification) {
+    if (speaker) {
 
-        const speaker =
-            data.speaker_verification;
+        const score = Number(
+            speaker.score ?? 0
+        );
 
-        const score =
-            Number(
-                speaker.score || 0
-            );
+        const sameSpeaker =
+            speaker.same_speaker === true;
 
-        if (speakerResult) {
+        if (speakerIdentity) {
 
-            speakerResult.textContent =
-                speaker.same_speaker
+            speakerIdentity.textContent =
+                sameSpeaker
                     ? "VERIFIED"
                     : "MISMATCH";
 
         }
 
-        if (speakerScore) {
+        if (speakerVerification) {
 
-            speakerScore.textContent =
-                score.toFixed(4);
+            speakerVerification.textContent =
+                sameSpeaker
+                    ? `Match • ${score.toFixed(4)}`
+                    : `Mismatch • ${score.toFixed(4)}`;
 
         }
 
         if (speakerBar) {
 
+            const safeScore =
+                Math.min(
+                    Math.max(score, 0),
+                    1
+                );
+
             speakerBar.style.width =
-                `${Math.min(
-                    Math.max(score * 100, 0),
-                    100
-                )}%`;
+                `${safeScore * 100}%`;
 
         }
 
     } else {
 
-        if (speakerResult) {
-            speakerResult.textContent =
+        if (speakerIdentity) {
+
+            speakerIdentity.textContent =
                 "N/A";
+
         }
 
-        if (speakerScore) {
-            speakerScore.textContent =
-                "Not provided";
+        if (speakerVerification) {
+
+            speakerVerification.textContent =
+                "Reference not provided";
+
         }
 
         if (speakerBar) {
+
             speakerBar.style.width =
                 "0%";
+
         }
 
     }
-
+    
 
     /* Context */
 

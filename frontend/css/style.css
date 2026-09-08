@@ -3431,3 +3431,48 @@ body.security-danger .prediction-badge {
         0 0 18px rgba(86, 255, 205, 0.08),
         inset 0 0 12px rgba(86, 255, 205, 0.03);
 }
+/* ============================================================
+   TRUSTED SPEAKER REFERENCE
+============================================================ */
+
+.reference-speaker-wrapper {
+    margin-top: 14px;
+}
+
+.secondary-button {
+    width: 100%;
+    min-height: 48px;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    padding: 0 18px;
+
+    border: 1px solid var(--border-bright);
+    border-radius: 10px;
+
+    background: transparent;
+    color: inherit;
+
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+
+    cursor: pointer;
+
+    transition:
+        background 0.2s ease,
+        border-color 0.2s ease,
+        transform 0.2s ease;
+}
+
+.secondary-button:hover {
+    background: var(--neon-soft);
+    transform: translateY(-1px);
+}
+
+#reference-file-preview {
+    margin-top: 10px;
+}

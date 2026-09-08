@@ -45,6 +45,10 @@ JS_DIR = FRONTEND_DIR / "js"
 
 class ChallengeStartRequest(BaseModel):
     session_id: str = "browser-session"
+class AdaptiveChallengeRequest(BaseModel):
+    transcript: str
+    session_id: str = "browser-session"
+
 # ============================================================
 # FASTAPI APP
 # ============================================================
@@ -252,6 +256,120 @@ def start_challenge_response(request: ChallengeStartRequest):
         "challenge": challenge["phrase"],
         "expires_at": challenge["expires_at"].isoformat(),
         "max_attempts": 3,
+    }
+
+@app.post("/api/adaptive-challenge/start")
+def start_adaptive_challenge(
+    request: AdaptiveChallengeRequest,
+):
+    """
+    Generate a context-aware challenge from the
+    caller's current conversational claim.
+    """
+
+    if firewall is None:
+        raise HTTPException(
+            status_code=503,
+            detail="VoiceShield AI is still initializing.",
+        )
+
+    transcript = request.transcript.strip()
+
+    if not transcript:
+        raise HTTPException(
+            status_code=400,
+            detail="Transcript is required.",
+        )
+
+    service = firewall.challenge_service
+
+    challenge = service.start_adaptive_challenge(
+        transcript
+    )
+
+    if challenge is None:
+        return {
+            "success": False,
+            "challenge_available": False,
+            "message": (
+                "No suitable factual claim was detected "
+                "for an adaptive challenge."
+            ),
+        }
+
+    return {
+        "success": True,
+        "challenge_available": True,
+        "challenge_id": challenge["challenge_id"],
+        "claim": challenge["claim"],
+        "question": challenge["question"],
+        "follow_up_question": (
+            challenge["follow_up_question"]
+        ),
+        "challenge_type": challenge["challenge_type"],
+        "expires_at": challenge["expires_at"].isoformat(),
+        "max_attempts": challenge["max_attempts"],
+    }
+class AdaptiveChallengeVerifyRequest(BaseModel):
+    challenge_id: str
+    answer: str
+    follow_up_answer: str | None = None
+    response_delay_seconds: float | None = None
+
+@app.post("/api/adaptive-challenge/verify")
+def verify_adaptive_challenge(
+    request: AdaptiveChallengeVerifyRequest,
+):
+    """
+    Verify the caller's response to a context-aware
+    adaptive challenge.
+    """
+
+    if firewall is None:
+        raise HTTPException(
+            status_code=503,
+            detail="VoiceShield AI is still initializing.",
+        )
+
+    if not request.challenge_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Challenge ID is required.",
+        )
+
+    if not request.answer.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Challenge answer is required.",
+        )
+
+    service = firewall.challenge_service
+
+    try:
+        result = service.verify_adaptive_response(
+            challenge_id=request.challenge_id,
+            answer=request.answer,
+            follow_up_answer=request.follow_up_answer,
+            response_delay_seconds=(
+                request.response_delay_seconds
+            ),
+        )
+
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "success": True,
+        "adaptive_challenge": result,
     }
 
 
@@ -591,8 +709,8 @@ def create_live_final_notification(payload: dict = Body(...)):
 
 @app.post("/api/analyze")
 async def analyze_audio(
-    file: UploadFile = File(...)
-    
+    file: UploadFile = File(...),
+    reference_audio: UploadFile | None = File(None),
 ):
 
     if firewall is None:
@@ -633,12 +751,53 @@ async def analyze_audio(
                 "Use WAV, MP3, FLAC, OGG, WebM, M4A, AAC, or Opus."
             ),
         )
+    # --------------------------------------------------------
+    # Validate trusted speaker reference audio
+    # --------------------------------------------------------
 
+    reference_extension = None
+
+    if reference_audio is not None:
+
+        if not reference_audio.filename:
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Reference speaker filename is missing."
+                ),
+            )
+
+        reference_extension = (
+            Path(
+                reference_audio.filename
+            )
+            .suffix
+            .lower()
+        )
+
+        if (
+            reference_extension
+            not in allowed_extensions
+        ):
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Unsupported reference speaker audio "
+                    "format. Use WAV, MP3, FLAC, OGG, "
+                    "WebM, M4A, AAC, or Opus."
+                ),
+            )
     # --------------------------------------------------------
     # Temporary file
     # --------------------------------------------------------
 
     temp_path = None
+    converted_path = None
+
+    reference_temp_path = None
+    reference_converted_path = None
 
     try:
 
@@ -655,7 +814,61 @@ async def analyze_audio(
             temp_path = Path(
                 temp_file.name
             )
+        # --------------------------------------------------------
+        # Save trusted speaker reference audio
+        # --------------------------------------------------------
 
+        reference_analysis_path = None
+
+        if reference_audio is not None:
+
+            try:
+
+                with tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=reference_extension,
+                ) as reference_temp_file:
+
+                    shutil.copyfileobj(
+                        reference_audio.file,
+                        reference_temp_file,
+                    )
+
+                    reference_temp_path = Path(
+                        reference_temp_file.name
+                    )
+
+                reference_analysis_path = (
+                    reference_temp_path
+                )
+
+                if reference_extension in {
+                    ".webm",
+                    ".m4a",
+                    ".aac",
+                    ".opus",
+                    ".oga",
+                }:
+
+                    reference_converted_path = (
+                        convert_audio_to_wav(
+                            reference_temp_path
+                        )
+                    )
+
+                    reference_analysis_path = (
+                        reference_converted_path
+                    )
+
+            except Exception as exc:
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Failed to prepare reference "
+                        f"speaker audio: {exc}"
+                    ),
+                ) from exc
         # ----------------------------------------------------
         # Convert browser recordings before running the firewall.
         # ----------------------------------------------------
@@ -678,6 +891,7 @@ async def analyze_audio(
 
         result = firewall.analyze_call(
             audio_path=analysis_path,
+            reference_audio_path=reference_analysis_path,
         )
 
         publish_result_notification(
@@ -700,14 +914,24 @@ async def analyze_audio(
 
     finally:
 
-        if temp_path is not None:
+        for path in (
+            temp_path,
+            converted_path,
+            reference_temp_path,
+            reference_converted_path,
+        ):
 
-            try:
-                temp_path.unlink(
-                    missing_ok=True
-                )
-            except Exception:
-                pass
+            if path is not None:
+
+                try:
+
+                    path.unlink(
+                        missing_ok=True
+                    )
+
+                except Exception:
+
+                    pass
 def pcm_to_wav(
     pcm_data: bytes,
     output_path: Path,
