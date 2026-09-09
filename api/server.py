@@ -1,10 +1,12 @@
+from datetime import time
 from pathlib import Path
 import shutil
+import time
 import tempfile
 import uuid
 import json
 import subprocess
-
+import asyncio
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +31,7 @@ from app.realtime_engine import RealtimeDetectionEngine
 from app.transcription_service import transcribe_audio
 from challenge_response.challenge_service import ChallengeService
 from notifications import NotificationManager
+from app.transcription_service import transcribe_audio
 # ============================================================
 # PATHS
 # ============================================================
@@ -158,25 +161,75 @@ def publish_result_notification(
 def startup_event():
     global firewall, realtime_engine
 
+    startup_begin = time.perf_counter()
+
     print("=" * 70)
     print("Initializing VoiceShield AI API")
     print("=" * 70)
 
+    # --------------------------------------------------------
+    # FIREWALL
+    # --------------------------------------------------------
+
+    t = time.perf_counter()
+
     firewall = VoiceSecurityFirewall()
 
-    # Wire the existing VoiceShield detector and speaker verifier
-    # into the isolated challenge-response service.
+    print(
+        f"[STARTUP] VoiceSecurityFirewall: "
+        f"{time.perf_counter() - t:.2f}s"
+    )
+
+    # --------------------------------------------------------
+    # REALTIME ENGINE
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Reuse the detector already created by the firewall.
+    # This prevents a second DeepfakeDetector from loading.
+    # --------------------------------------------------------
+
+    t = time.perf_counter()
+
+    realtime_engine = RealtimeDetectionEngine(
+        detector=firewall.detector
+    )
+
+    print(
+        f"[STARTUP] RealtimeDetectionEngine: "
+        f"{time.perf_counter() - t:.2f}s"
+    )
+
+    # --------------------------------------------------------
+    # CHALLENGE SERVICE
+    # --------------------------------------------------------
+
+    t = time.perf_counter()
+
     firewall.challenge_service = ChallengeService(
         risk_engine=firewall.risk_engine,
         speaker_verifier=firewall.speaker_verifier,
         detector=firewall.detector,
     )
 
-    realtime_engine = RealtimeDetectionEngine()
+    print(
+        f"[STARTUP] ChallengeService: "
+        f"{time.perf_counter() - t:.2f}s"
+    )
+
+    # --------------------------------------------------------
+    # TOTAL
+    # --------------------------------------------------------
+
+    total_time = time.perf_counter() - startup_begin
+
+    print(
+        f"[STARTUP] TOTAL: "
+        f"{total_time:.2f}s"
+    )
+
     print("=" * 70)
     print("VoiceShield AI API READY")
     print("=" * 70)
-
 # ============================================================
 # FRONTEND ROUTE
 # ============================================================
@@ -533,9 +586,44 @@ async def verify_challenge_response(
             or ""
         ).strip()
 
+        analysis_transcript_text = str(
+            transcription.get(
+                "analysis_transcript",
+                transcript_text,
+            )
+            or transcript_text
+        ).strip()
+
+        language_code = transcription.get(
+            "language_code"
+        )
+
+        language_probability = transcription.get(
+            "language_probability"
+        )
+
+        transcription_provider = transcription.get(
+            "provider"
+        )
+
         print(
             "ACTUAL AUDIO TRANSCRIPT:",
             transcript_text
+        )
+
+        print(
+            "ANALYSIS TRANSCRIPT:",
+            analysis_transcript_text
+        )
+
+        print(
+            "DETECTED LANGUAGE:",
+            language_code
+        )
+
+        print(
+            "LANGUAGE CONFIDENCE:",
+            language_probability
         )
 
         # ----------------------------------------------------
@@ -886,12 +974,98 @@ async def analyze_audio(
             analysis_path = converted_path
 
         # ----------------------------------------------------
+        # MULTILINGUAL TRANSCRIPTION
+        # ----------------------------------------------------
+
+        audio_bytes = temp_path.read_bytes()
+
+        transcription = await asyncio.to_thread(
+            transcribe_audio,
+            audio_bytes,
+            file.filename,
+            file.content_type or "audio/webm",
+        )
+
+        transcript_text = str(
+            transcription.get(
+                "transcript",
+                ""
+            )
+            or ""
+        ).strip()
+
+        analysis_transcript_text = str(
+            transcription.get(
+                "analysis_transcript",
+                transcript_text,
+            )
+            or transcript_text
+        ).strip()
+
+        language_code = transcription.get(
+            "language_code"
+        )
+
+        language_probability = transcription.get(
+            "language_probability"
+        )
+
+        transcription_provider = transcription.get(
+            "provider"
+        )
+
+        transcription_error = transcription.get(
+            "error"
+        )
+
+        print(
+            "MULTILINGUAL TRANSCRIPTION"
+        )
+
+        print(
+            "Provider          :",
+            transcription_provider
+        )
+
+        print(
+            "Language          :",
+            language_code
+        )
+
+        print(
+            "Language Confidence:",
+            language_probability
+        )
+
+        print(
+            "Original Transcript:",
+            transcript_text
+        )
+
+        print(
+            "Analysis Transcript:",
+            analysis_transcript_text
+        )
+
+        if transcription_error:
+            print(
+                "Transcription Error:",
+                transcription_error
+            )
+
+
+        # ----------------------------------------------------
         # Run firewall
         # ----------------------------------------------------
 
         result = firewall.analyze_call(
             audio_path=analysis_path,
-            reference_audio_path=reference_analysis_path,
+            reference_audio=reference_analysis_path,
+            transcript=transcript_text,
+            analysis_transcript=analysis_transcript_text,
+            language_code=language_code,
+            language_probability=language_probability,
+            transcription_provider=transcription_provider,
         )
 
         publish_result_notification(
@@ -1059,6 +1233,11 @@ async def simulate_call(
         # ----------------------------------------------------
         # Convert WebM/Opus -> WAV
         # ----------------------------------------------------
+        # This is a temporary conversion to WAV format.
+        # In a production environment, you might want to use
+        # a more efficient approach, such as processing the
+        # audio directly in its original format.
+        # ----------------------------------------------------
 
         converted_path = convert_audio_to_wav(
             input_path
@@ -1070,10 +1249,24 @@ async def simulate_call(
         )
 
         # ----------------------------------------------------
-        # Run realtime detector
+        # Run realtime detector using the EXISTING persistent
+        # realtime engine.
+        #
+        # IMPORTANT:
+        # Do not create a new CallSimulator() without passing
+        # the existing engine, otherwise another DeepfakeDetector
+        # could be loaded into memory.
         # ----------------------------------------------------
 
-        simulator = CallSimulator()
+        if realtime_engine is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Realtime detection engine is not ready.",
+            )
+
+        simulator = CallSimulator(
+            engine=realtime_engine
+        )
 
         events = []
 
@@ -1208,15 +1401,134 @@ async def live_call(websocket: WebSocket):
                         sample_rate=SAMPLE_RATE,
                     )
 
+                    # ------------------------------------------------
+                    # Multilingual transcription
+                    # ------------------------------------------------
+
+                    transcript_text = ""
+                    analysis_transcript_text = ""
+                    language_code = None
+                    language_probability = None
+                    transcription_provider = None
+
+                    try:
+
+                        audio_bytes = temp_path.read_bytes()
+
+                        transcription = await asyncio.to_thread(
+                            transcribe_audio,
+                            audio_bytes,
+                            f"live_{chunk_index}.wav",
+                            "audio/wav",
+                        )
+
+                        transcript_text = str(
+                            transcription.get(
+                                "transcript",
+                                ""
+                            )
+                            or ""
+                        ).strip()
+
+                        analysis_transcript_text = str(
+                            transcription.get(
+                                "analysis_transcript",
+                                transcript_text,
+                            )
+                            or transcript_text
+                        ).strip()
+
+                        language_code = transcription.get(
+                            "language_code"
+                        )
+
+                        language_probability = transcription.get(
+                            "language_probability"
+                        )
+
+                        transcription_provider = transcription.get(
+                            "provider"
+                        )
+
+                        transcription_error = transcription.get(
+                            "error"
+                        )
+
+                        print(
+                            "LIVE MULTILINGUAL TRANSCRIPTION"
+                        )
+
+                        print(
+                            "Provider:",
+                            transcription_provider
+                        )
+
+                        print(
+                            "Language:",
+                            language_code
+                        )
+
+                        print(
+                            "Language Confidence:",
+                            language_probability
+                        )
+
+                        print(
+                            "Transcript:",
+                            transcript_text
+                        )
+
+                        if transcription_error:
+
+                            print(
+                                "Transcription Error:",
+                                transcription_error
+                            )
+
+
+                    except Exception as exc:
+
+                        print(
+                            "Live transcription failed:",
+                            exc
+                        )
+
+                    # ------------------------------------------------
+                    # Voice / risk analysis with complete firewall
+                    # ------------------------------------------------
+
                     result = await asyncio.to_thread(
-                        realtime_engine.analyze,
+                        firewall.analyze_call,
                         temp_path,
+                        None,
+                        None,
+                        None,
+                        transcript_text,
+                        analysis_transcript_text,
+                        language_code,
+                        language_probability,
+                        transcription_provider,
+                        True,
+                    )
+                    # ------------------------------------------------
+                    # Publish serious live detection as a notification
+                    # ------------------------------------------------
+
+                    publish_result_notification(
+                        result,
+                        source=f"microphone-call:{session_id}",
+                        chunk_index=chunk_index,
                     )
 
                     event = {
                         "event": "live_analysis",
                         "chunk_index": chunk_index,
                         "result": result,
+                        "transcript": transcript_text,
+                        "analysis_transcript": analysis_transcript_text,
+                        "language_code": language_code,
+                        "language_probability": language_probability,
+                        "transcription_provider": transcription_provider,
                     }
 
                     await websocket.send_json(event)

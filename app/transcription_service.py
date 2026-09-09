@@ -18,6 +18,7 @@ def _multipart_form(
     content_type: str,
     audio: bytes,
 ) -> tuple[bytes, str]:
+
     boundary = f"----VoiceShield{uuid.uuid4().hex}"
     body = bytearray()
 
@@ -37,6 +38,7 @@ def _multipart_form(
             f"Content-Type: {content_type}\r\n\r\n"
         ).encode()
     )
+
     body.extend(audio)
     body.extend(b"\r\n")
     body.extend(f"--{boundary}--\r\n".encode())
@@ -51,7 +53,8 @@ def _post_transcription(
     audio: bytes,
     filename: str,
     content_type: str,
-) -> str:
+) -> dict[str, Any]:
+
     body, multipart_type = _multipart_form(
         fields,
         "file",
@@ -59,6 +62,7 @@ def _post_transcription(
         content_type,
         audio,
     )
+
     request_headers = {
         **headers,
         "Content-Type": multipart_type,
@@ -73,14 +77,32 @@ def _post_transcription(
     )
 
     with request.urlopen(http_request, timeout=30) as response:
-        payload: Any = json.loads(response.read().decode("utf-8"))
+        payload: Any = json.loads(
+            response.read().decode("utf-8")
+        )
+
+    if not isinstance(payload, dict):
+        return {
+            "transcript": "",
+            "language_code": None,
+            "language_probability": None,
+        }
 
     transcript = (
-        payload.get("transcript", payload.get("text", ""))
-        if isinstance(payload, dict)
-        else ""
+        payload.get(
+            "transcript",
+            payload.get("text", ""),
+        )
+        or ""
     )
-    return str(transcript or "").strip()
+
+    return {
+        "transcript": str(transcript).strip(),
+        "language_code": payload.get("language_code"),
+        "language_probability": payload.get(
+            "language_probability"
+        ),
+    }
 
 
 def _sarvam_transcribe(
@@ -88,11 +110,37 @@ def _sarvam_transcribe(
     audio: bytes,
     filename: str,
     content_type: str,
-) -> str:
+) -> dict[str, Any]:
+
     return _post_transcription(
         SARVAM_URL,
         {"api-subscription-key": api_key},
-        {"model": "saaras:v3", "mode": "transcribe"},
+        {
+            "model": "saaras:v3",
+            "mode": "transcribe",
+            "language_code": "unknown",
+        },
+        audio,
+        filename,
+        content_type,
+    )
+
+
+def _sarvam_translate(
+    api_key: str,
+    audio: bytes,
+    filename: str,
+    content_type: str,
+) -> dict[str, Any]:
+
+    return _post_transcription(
+        SARVAM_URL,
+        {"api-subscription-key": api_key},
+        {
+            "model": "saaras:v3",
+            "mode": "translate",
+            "language_code": "unknown",
+        },
         audio,
         filename,
         content_type,
@@ -104,11 +152,14 @@ def _elevenlabs_transcribe(
     audio: bytes,
     filename: str,
     content_type: str,
-) -> str:
+) -> dict[str, Any]:
+
     return _post_transcription(
         ELEVENLABS_URL,
         {"xi-api-key": api_key},
-        {"model_id": "scribe_v1"},
+        {
+            "model_id": "scribe_v1",
+        },
         audio,
         filename,
         content_type,
@@ -119,42 +170,178 @@ def transcribe_audio(
     audio: bytes,
     filename: str = "live_chunk.webm",
     content_type: str = "audio/webm",
-) -> dict[str, str | None]:
-    """Transcribe with either configured provider, falling back to the other."""
+) -> dict[str, Any]:
+    """
+    Multilingual transcription with provider fallback.
 
-    sarvam_key = os.getenv("SARVAM_API_KEY", "").strip()
-    elevenlabs_key = os.getenv("ElevenLabs_API_KEY", "").strip()
-    providers: list[tuple[str, str, Any]] = []
+    Returns:
+        {
+            "provider": str | None,
+            "transcript": str,
+            "analysis_transcript": str,
+            "language_code": str | None,
+            "language_probability": float | None,
+            "error": str | None,
+        }
+    """
+
+    sarvam_key = os.getenv(
+        "SARVAM_API_KEY",
+        "",
+    ).strip()
+
+    elevenlabs_key = os.getenv(
+        "ElevenLabs_API_KEY",
+        "",
+    ).strip()
+
+    last_error = (
+        "No transcription API key is configured."
+    )
+
+    # ---------------------------------------------------------
+    # 1. SARVAM
+    # ---------------------------------------------------------
 
     if sarvam_key:
-        providers.append(
-            ("sarvam", sarvam_key, _sarvam_transcribe)
-        )
-    if elevenlabs_key:
-        providers.append(
-            ("elevenlabs", elevenlabs_key, _elevenlabs_transcribe)
-        )
 
-    last_error = "No transcription API key is configured."
-
-    for provider, api_key, transcriber in providers:
         try:
-            transcript = transcriber(
-                api_key,
+
+            transcription = _sarvam_transcribe(
+                sarvam_key,
                 audio,
                 filename,
                 content_type,
             )
+
+            transcript = transcription["transcript"]
+
+            language_code = (
+                transcription.get("language_code")
+            )
+
+            language_probability = (
+                transcription.get(
+                    "language_probability"
+                )
+            )
+
+            # English does not need translation.
+            if (
+                language_code is None
+                or language_code.startswith("en")
+            ):
+
+                analysis_transcript = transcript
+
+            else:
+
+                try:
+
+                    translation = _sarvam_translate(
+                        sarvam_key,
+                        audio,
+                        filename,
+                        content_type,
+                    )
+
+                    analysis_transcript = (
+                        translation.get(
+                            "transcript",
+                            transcript,
+                        )
+                        or transcript
+                    )
+
+                except (
+                    error.HTTPError,
+                    error.URLError,
+                    TimeoutError,
+                    OSError,
+                    ValueError,
+                ) as exc:
+
+                    print(
+                        "[TRANSCRIPTION] "
+                        f"Translation failed: {exc}"
+                    )
+
+                    # Keep original transcript if
+                    # translation fails.
+                    analysis_transcript = transcript
+
             return {
-                "provider": provider,
+                "provider": "sarvam",
                 "transcript": transcript,
+                "analysis_transcript": analysis_transcript,
+                "language_code": language_code,
+                "language_probability": language_probability,
+                "error": None,
             }
-        except (error.HTTPError, error.URLError, TimeoutError, OSError, ValueError) as exc:
-            last_error = f"{provider}: {exc}"
-            print(f"[TRANSCRIPTION] {last_error}")
+
+        except (
+            error.HTTPError,
+            error.URLError,
+            TimeoutError,
+            OSError,
+            ValueError,
+        ) as exc:
+
+            last_error = f"sarvam: {exc}"
+
+            print(
+                f"[TRANSCRIPTION] {last_error}"
+            )
+
+    # ---------------------------------------------------------
+    # 2. ELEVENLABS FALLBACK
+    # ---------------------------------------------------------
+
+    if elevenlabs_key:
+
+        try:
+
+            transcription = _elevenlabs_transcribe(
+                elevenlabs_key,
+                audio,
+                filename,
+                content_type,
+            )
+
+            transcript = transcription["transcript"]
+
+            return {
+                "provider": "elevenlabs",
+                "transcript": transcript,
+                "analysis_transcript": transcript,
+                "language_code": None,
+                "language_probability": None,
+                "error": None,
+            }
+
+        except (
+            error.HTTPError,
+            error.URLError,
+            TimeoutError,
+            OSError,
+            ValueError,
+        ) as exc:
+
+            last_error = f"elevenlabs: {exc}"
+
+            print(
+                f"[TRANSCRIPTION] {last_error}"
+            )
+
+    # ---------------------------------------------------------
+    # 3. COMPLETE FAILURE
+    # ---------------------------------------------------------
 
     return {
         "provider": None,
         "transcript": "",
+        "analysis_transcript": "",
+        "language_code": None,
+        "language_probability": None,
         "error": last_error,
     }

@@ -17,10 +17,14 @@ class CallSimulator:
 
     def __init__(
         self,
-        engine: RealtimeDetectionEngine | None = None,
+        engine: RealtimeDetectionEngine,
     ):
-        self.engine = engine or RealtimeDetectionEngine()
+        if engine is None:
+            raise ValueError(
+                "CallSimulator requires an existing RealtimeDetectionEngine."
+            )
 
+        self.engine = engine
     def stream_call(
         self,
         audio_path: str | Path,

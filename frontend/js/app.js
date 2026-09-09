@@ -821,6 +821,10 @@ async function analyzeAudio(
             result
         );
 
+        updateMultilingualDashboard(
+            result
+        );
+
         return result;
     } catch (error) {
 
@@ -1119,6 +1123,24 @@ function renderAnalysis(data) {
 
 function updateSecurityIntelligence(result) {
 
+    const metricsSection =
+        document.getElementById("metrics-section");
+
+    if (metricsSection) {
+        metricsSection.classList.remove("hidden");
+    }
+
+    const riskSection =
+        document.getElementById("risk-section");
+
+    if (riskSection) {
+        riskSection.classList.remove("hidden");
+    }
+
+    /* =====================================================
+       EXISTING SECURITY INTELLIGENCE DATA
+    ===================================================== */
+
     const detection =
         result.voice_detection || {};
 
@@ -1272,12 +1294,18 @@ function updateSecurityIntelligence(result) {
 
 }
 
-
 /* ============================================================
    THREAT ASSESSMENT
 ============================================================ */
 
 function updateThreatAssessment(result) {
+    
+    const riskSection =
+    document.getElementById("risk-section");
+
+    if (riskSection) {
+        riskSection.classList.remove("hidden");
+    }
 
     const risk =
         result.risk || {};
@@ -1297,47 +1325,66 @@ function updateThreatAssessment(result) {
             risk.action || "ALLOW"
         ).toUpperCase();
 
-    const reasons = Array.isArray(risk.reasons)
-        ? risk.reasons
-        : [];
+    const reasons =
+        Array.isArray(risk.reasons)
+            ? risk.reasons
+            : [];
+
+
+    /* --------------------------------------------------------
+       RISK SCORE
+    -------------------------------------------------------- */
 
     const scoreElement =
         document.getElementById(
             "risk-score"
         );
 
+    if (scoreElement) {
+
+        scoreElement.textContent =
+            Math.round(score);
+
+    }
+
+
+    /* --------------------------------------------------------
+       RISK LEVEL
+    -------------------------------------------------------- */
+
     const levelElement =
         document.getElementById(
             "risk-level"
         );
+
+    if (levelElement) {
+
+        levelElement.textContent =
+            `${level} RISK`;
+
+    }
+
+
+    /* --------------------------------------------------------
+       ACTION
+    -------------------------------------------------------- */
 
     const actionElement =
         document.getElementById(
             "risk-action"
         );
 
-    if (scoreElement) {
-        scoreElement.textContent =
-            Math.round(score);
-    }
-
-    if (levelElement) {
-        levelElement.textContent =
-            `${level} RISK`;
-    }
-
     if (actionElement) {
+
         actionElement.textContent =
             action;
+
     }
 
 
-    /*
-     * Your HTML uses:
-     * #risk-ring-progress
-     *
-     * So update that element directly.
-     */
+    /* --------------------------------------------------------
+       RISK RING
+    -------------------------------------------------------- */
 
     const riskCircle =
         document.getElementById(
@@ -1365,6 +1412,25 @@ function updateThreatAssessment(result) {
 
     }
 
+
+    /* --------------------------------------------------------
+       DEBUG
+    -------------------------------------------------------- */
+
+    console.log(
+        "THREAT ASSESSMENT UPDATED:",
+        {
+            score: score,
+            level: level,
+            action: action,
+            reasons: reasons,
+            riskSectionVisible:
+                riskSection
+                    ? !riskSection.classList.contains("hidden")
+                    : false
+        }
+    );
+
 }
 
 
@@ -1374,13 +1440,20 @@ function updateThreatAssessment(result) {
 
 function updateSecurityFindings(result) {
 
-    const risk =
-        result.risk || {};
+    const riskSection =
+        document.getElementById("risk-section");
 
-    const reasons =
-        Array.isArray(risk.reasons)
-            ? risk.reasons
-            : [];
+    if (riskSection) {
+        riskSection.classList.remove("hidden");}
+
+    console.log(
+        "UPDATING SECURITY FINDINGS:",
+        result
+    );
+
+    /* --------------------------------------------------------
+       FINDINGS CONTAINER
+    -------------------------------------------------------- */
 
     const findingsContainer =
         document.getElementById(
@@ -1388,46 +1461,150 @@ function updateSecurityFindings(result) {
         );
 
     if (!findingsContainer) {
+
+        console.error(
+            "SECURITY FINDINGS CONTAINER NOT FOUND"
+        );
+
         return;
+
     }
+
+
+    /* --------------------------------------------------------
+       RISK DATA
+    -------------------------------------------------------- */
+
+    const risk =
+        result.risk || {};
+
+    const reasons =
+        Array.isArray(
+            risk.reasons
+        )
+            ? risk.reasons
+            : [];
+
+
+    /* --------------------------------------------------------
+       CLEAR OLD FINDINGS
+    -------------------------------------------------------- */
 
     findingsContainer.innerHTML = "";
 
+
+    /* --------------------------------------------------------
+       NO REASONS
+    -------------------------------------------------------- */
 
     if (reasons.length === 0) {
 
         findingsContainer.innerHTML = `
             <div class="finding safe">
                 <span class="finding-icon">✓</span>
-                <span>No significant security risk detected.</span>
+                <span>
+                    No significant security risk detected.
+                </span>
             </div>
         `;
 
+        console.log(
+            "SECURITY FINDINGS: No reasons returned."
+        );
+
         return;
+
     }
 
 
-    reasons.forEach((reason) => {
+    /* --------------------------------------------------------
+       RENDER REASONS
+    -------------------------------------------------------- */
 
-        const finding =
-            document.createElement("div");
+    reasons.forEach(
+        (reason) => {
 
-        finding.className =
-            "finding";
+            let text =
+                "";
 
-        finding.innerHTML = `
-            <span class="finding-icon">!</span>
-            <span>${escapeHtml(reason)}</span>
-        `;
+            let severity =
+                "warning";
 
-        findingsContainer.appendChild(
-            finding
-        );
+            if (
+                typeof reason ===
+                "string"
+            ) {
 
-    });
+                text =
+                    reason;
+
+            } else if (
+                typeof reason ===
+                "object"
+            ) {
+
+                text =
+                    reason.message ||
+                    reason.reason ||
+                    reason.description ||
+                    JSON.stringify(reason);
+
+                severity =
+                    String(
+                        reason.severity ||
+                        reason.level ||
+                        "warning"
+                    ).toLowerCase();
+
+            } else {
+
+                text =
+                    String(reason);
+
+            }
+
+
+            const isSafe =
+                severity === "safe" ||
+                severity === "low";
+
+
+            const finding =
+                document.createElement(
+                    "div"
+                );
+
+            finding.className =
+                isSafe
+                    ? "finding safe"
+                    : "finding";
+
+
+            finding.innerHTML = `
+                <span class="finding-icon">
+                    ${isSafe ? "✓" : "⚠"}
+                </span>
+
+                <span>
+                    ${escapeHtml(text)}
+                </span>
+            `;
+
+
+            findingsContainer.appendChild(
+                finding
+            );
+
+        }
+    );
+
+
+    console.log(
+        "SECURITY FINDINGS RENDERED:",
+        reasons
+    );
 
 }
-
 
 /* ============================================================
    RISK STYLING
@@ -3195,10 +3372,52 @@ function handleLiveEvent(data) {
             result
         );
 
+
+        /* =====================================================
+        SECTION 03 — SECURITY INTELLIGENCE
+        ===================================================== */
+
+        updateSecurityIntelligence(
+            result
+        );
+
+
+        /* =====================================================
+        SECTION 04 — THREAT ASSESSMENT
+        ===================================================== */
+
+        updateThreatAssessment(
+            result
+        );
+
+
+        /* =====================================================
+        SECTION 05 — SECURITY FINDINGS
+        ===================================================== */
+
+        updateSecurityFindings(
+            result
+        );
+
+
+        /* =====================================================
+        SECTION 06 — REAL-TIME AUDIO ANALYSIS
+        ===================================================== */
+
         updateLiveDashboard(
             result,
             data.chunk_index
         );
+
+
+        /* =====================================================
+        MULTILINGUAL / TRANSCRIPTION INFORMATION
+        ===================================================== */
+
+        updateMultilingualDashboard(
+            result
+        );
+
 
         return;
     }
@@ -3219,6 +3438,7 @@ function handleLiveEvent(data) {
     }
 
 }
+
 function updateLiveDashboard(
     result,
     chunkIndex
@@ -5278,14 +5498,17 @@ async function handleLiveSecurityState(stableResult) {
          * This uses the EXISTING UI functions.
          * No HTML structure changes are required.
          */
-        updateLiveThreatDisplay({
-            prediction: "fake",
-            fake_score:
-                stableResult.fakeScore,
-            risk_score:
-                stableResult.riskScore,
-            stable: true
-        });
+        updateLiveThreatDisplay(
+            {
+                prediction: "fake",
+                fake_score:
+                    stableResult.fakeScore,
+                risk_score:
+                    stableResult.riskScore,
+                stable: true
+            },
+            stableResult
+        );
         console.log("🚨 LIVE CALL: FAKE DETECTED");
         console.log("🚨 FAKE LIVE AUDIO DETECTED");
         console.log("🚨 OPENING CHALLENGE RESPONSE");
@@ -5427,14 +5650,17 @@ async function handleLiveSecurityState(stableResult) {
     if (
         prediction === "real"
     ) {
-        updateLiveThreatDisplay({
-            prediction: "real",
-            fake_score:
-                stableResult.fakeScore,
-            risk_score:
-                stableResult.riskScore,
-            stable: true
-        });
+        updateLiveThreatDisplay(
+            {
+                prediction: "real",
+                fake_score:
+                    stableResult.fakeScore,
+                risk_score:
+                    stableResult.riskScore,
+                stable: true
+            },
+            stableResult
+        );
     }
 }
 function renderLiveChunkResult(event) {
@@ -5607,24 +5833,84 @@ function renderLiveChunkResult(event) {
             riskLevel.textContent = "ANALYZING";
         }
     }
+    /*
+     * ============================================================
+     * LIVE MAIN SECURITY DASHBOARD
+     *
+     * Feed the current live result into the same dashboard
+     * functions used by uploaded-audio analysis.
+     * ============================================================
+     */
+
+    const liveDashboardResult = {
+        voice_detection: event.voice_detection || {
+            prediction: event.prediction || "unknown",
+            fake_score: Number(event.fake_score || 0),
+            confidence: Number(event.confidence || 0)
+        },
+
+        speaker_verification: event.speaker_verification || {
+            verified: event.speaker_verified ?? null,
+            similarity: Number(
+                event.speaker_similarity ||
+                event.similarity ||
+                0
+            )
+        },
+
+        context: event.context || {
+            risk_score: Number(
+                event.context_risk ||
+                0
+            ),
+            threat: event.context_threat || "Monitoring"
+        },
+
+        risk: {
+            score: Number(
+                stableResult?.riskScore ??
+                event.risk_score ??
+                0
+            ),
+            level:
+                stableResult?.prediction === "fake"
+                    ? "HIGH"
+                    : stableResult?.prediction === "real"
+                        ? "LOW"
+                        : (event.risk_level || "MEDIUM"),
+            action:
+                stableResult?.prediction === "fake"
+                    ? "BLOCK"
+                    : stableResult?.prediction === "real"
+                        ? "ALLOW"
+                        : (event.action || "MONITOR"),
+
+            reasons: event.reasons || []
+        }
+    };
 
     /*
-     * Always show the individual chunk
-     * in the timeline.
+     * SECTION 03
+     * Security Intelligence
      */
-    updateLiveDashboard(
-        {
-            voice_detection: {
-                prediction: event.prediction,
-                fake_score: event.fake_score
-            },
-            risk: {
-                score: event.risk_score,
-                action: event.action,
-                level: event.risk_level
-            }
-        },
-        event.live_chunk_index
+    updateSecurityIntelligence(
+        liveDashboardResult
+    );
+
+    /*
+     * SECTION 04
+     * Threat Assessment
+     */
+    updateThreatAssessment(
+        liveDashboardResult
+    );
+
+    /*
+     * SECTION 05
+     * Security Findings
+     */
+    updateSecurityFindings(
+        liveDashboardResult
     );
 
     /*
@@ -7318,4 +7604,242 @@ function triggerChallengeResponse(prediction, riskScore, source = "analysis") {
             }
         })
     );
+}
+/* ============================================================
+   MULTILINGUAL DASHBOARD
+============================================================ */
+
+function updateMultilingualDashboard(result) {
+
+    const transcription =
+        result.transcription || {};
+
+    const findingsContainer =
+        document.getElementById(
+            "security-findings"
+        );
+
+    if (!findingsContainer) {
+        return;
+    }
+
+    const provider =
+        transcription.provider || null;
+
+    const languageCode =
+        transcription.language_code || null;
+
+    const languageProbability =
+        Number(
+            transcription.language_probability ?? 0
+        );
+
+    const transcript =
+        String(
+            transcription.transcript || ""
+        ).trim();
+
+    /*
+     * If transcription information is completely
+     * unavailable, do not modify the existing findings.
+     */
+
+    if (
+        !provider &&
+        !languageCode &&
+        !transcript
+    ) {
+        return;
+    }
+
+    const languageName =
+        getLanguageName(
+            languageCode
+        );
+
+    const multilingualFindings = [];
+
+
+    /* --------------------------------------------------------
+       LANGUAGE
+    -------------------------------------------------------- */
+
+    if (languageCode) {
+
+        multilingualFindings.push(`
+            <div class="finding safe">
+                <span class="finding-icon">✓</span>
+                <span>
+                    Detected language:
+                    <strong>
+                        ${escapeHtml(languageName)}
+                    </strong>
+                    (${escapeHtml(languageCode)})
+                </span>
+            </div>
+        `);
+
+    }
+
+
+    /* --------------------------------------------------------
+       LANGUAGE CONFIDENCE
+    -------------------------------------------------------- */
+
+    if (
+        Number.isFinite(
+            languageProbability
+        ) &&
+        languageProbability > 0
+    ) {
+
+        multilingualFindings.push(`
+            <div class="finding safe">
+                <span class="finding-icon">✓</span>
+                <span>
+                    Language confidence:
+                    <strong>
+                        ${(
+                            languageProbability * 100
+                        ).toFixed(1)}%
+                    </strong>
+                </span>
+            </div>
+        `);
+
+    }
+
+
+    /* --------------------------------------------------------
+       TRANSCRIPTION PROVIDER
+    -------------------------------------------------------- */
+
+    if (provider) {
+
+        multilingualFindings.push(`
+            <div class="finding safe">
+                <span class="finding-icon">✓</span>
+                <span>
+                    Transcription provider:
+                    <strong>
+                        ${escapeHtml(
+                            formatProviderName(
+                                provider
+                            )
+                        )}
+                    </strong>
+                </span>
+            </div>
+        `);
+
+    }
+
+
+    /* --------------------------------------------------------
+       ORIGINAL TRANSCRIPT
+    -------------------------------------------------------- */
+
+    if (transcript) {
+
+        multilingualFindings.push(`
+            <div class="finding safe">
+                <span class="finding-icon">✓</span>
+                <span>
+                    Transcript:
+                    <strong>
+                        ${escapeHtml(
+                            transcript
+                        )}
+                    </strong>
+                </span>
+            </div>
+        `);
+
+    }
+
+
+    /*
+     * Add multilingual information BEFORE the
+     * existing security findings.
+     */
+
+    if (multilingualFindings.length > 0) {
+
+        findingsContainer.insertAdjacentHTML(
+            "afterbegin",
+            multilingualFindings.join("")
+        );
+
+    }
+
+}
+
+
+/* ============================================================
+   LANGUAGE NAME HELPER
+============================================================ */
+
+function getLanguageName(
+    languageCode
+) {
+
+    if (!languageCode) {
+        return "Unknown";
+    }
+
+    const languageMap = {
+
+        "en-IN": "English",
+        "hi-IN": "Hindi",
+        "bn-IN": "Bengali",
+        "gu-IN": "Gujarati",
+        "kn-IN": "Kannada",
+        "ml-IN": "Malayalam",
+        "mr-IN": "Marathi",
+        "od-IN": "Odia",
+        "pa-IN": "Punjabi",
+        "ta-IN": "Tamil",
+        "te-IN": "Telugu",
+        "as-IN": "Assamese",
+        "bho-IN": "Bhojpuri",
+        "mai-IN": "Maithili",
+        "mni-IN": "Manipuri",
+        "kok-IN": "Konkani",
+        "ne-IN": "Nepali",
+        "ur-IN": "Urdu",
+        "sat-IN": "Santali",
+        "sa-IN": "Sanskrit",
+        "brx-IN": "Bodo",
+        "doi-IN": "Dogri"
+    };
+
+    return (
+        languageMap[languageCode] ||
+        languageCode
+    );
+}
+
+
+/* ============================================================
+   TRANSCRIPTION PROVIDER NAME
+============================================================ */
+
+function formatProviderName(
+    provider
+) {
+
+    const normalized =
+        String(provider)
+            .toLowerCase()
+            .trim();
+
+    if (normalized === "sarvam") {
+        return "Sarvam AI";
+    }
+
+    if (normalized === "elevenlabs") {
+        return "ElevenLabs";
+    }
+
+    return provider;
 }
