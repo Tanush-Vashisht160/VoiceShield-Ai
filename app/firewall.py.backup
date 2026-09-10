@@ -8,9 +8,7 @@ from app.risk_engine import RiskEngine
 from app.speaker_verifier import SpeakerVerifier
 from app.security_decision import SecurityDecisionEngine
 from app.transcription_service import transcribe_audio
-from app.context_analyzer import ContextAnalyzer
-from app.detector import DeepfakeDetector
-from app.intent_analyzer import IntentAnalyzer
+
 
 class VoiceSecurityFirewall:
     """
@@ -34,13 +32,7 @@ class VoiceSecurityFirewall:
         )
         self.speaker_verifier = SpeakerVerifier()
         self.risk_engine = RiskEngine()
-
-        self.intent_analyzer = IntentAnalyzer()
-
-        self.context_analyzer = ContextAnalyzer(
-            intent_analyzer=self.intent_analyzer
-        )
-
+        self.context_analyzer = ContextAnalyzer()
         self.decision_engine = SecurityDecisionEngine()
         print()
         print("Voice Security Firewall initialized successfully.")
@@ -207,18 +199,21 @@ class VoiceSecurityFirewall:
                 context_text
             )
 
-            if context_risk_score is None:
-                context_risk_score_value = self._validate_score(
-                    context_result["score"],
-                    "context_risk_score",
-                )
+            context_risk_score_value = self._validate_score(
+                context_result["score"],
+                "context_risk_score",
+            )
 
             context_availability = 1.0
 
+        # ------------------------------------------------------------
+        # CASE 3: No context evidence available
+        # ------------------------------------------------------------
+
         else:
 
-            context_result = None
-
+            context_risk_score_value = 0.0
+            context_availability = 0.0
         # ------------------------------------------------------------
         # 4. SPEAKER VERIFICATION & MISMATCH SCORE
         # ------------------------------------------------------------
