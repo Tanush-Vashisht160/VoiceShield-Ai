@@ -39,6 +39,20 @@ class ContextAnalyzer:
             r"\bgift\s+card\b",
             r"\bvoucher\b",
             r"\bcrypto(?:currency)?\b",
+
+                        # Hindi
+            r"\bबैंक\s+अकाउंट\b",
+            r"\bबैंक\s+खाता\b",
+            r"\bपैसे\s+(?:भेजो|भेजें|ट्रांसफर)\b",
+            r"\bपैसा\s+(?:भेजो|भेजें)\b",
+            r"\bखाते\s+में\b",
+
+            # Hinglish
+            r"\bbank\s+account\b",
+            r"\baccount\s+me\b",
+            r"\bpaise\s+(?:bhejo|bhejen|transfer)\b",
+            r"\bpaise\s+transfer\b",
+            r"\bmoney\s+transfer\b",
         ],
 
         "credential_request": [
@@ -59,6 +73,19 @@ class ContextAnalyzer:
             r"\bsecurity\s+code\b",
             r"\bauthentication\s+code\b",
             r"\brecovery\s+code\b",
+
+                        # Hindi
+            r"\bओटीपी\b",
+            r"\bओटीपी\s+बताएं\b",
+            r"\bवेरिफिकेशन\s+कोड\b",
+            r"\bसत्यापन\s+कोड\b",
+
+            # Hinglish
+            r"\botp\s+batao\b",
+            r"\botp\s+bataiye\b",
+            r"\botp\s+bataye\b",
+            r"\bverification\s+code\b",
+            r"\bsecurity\s+code\b",
         ],
 
         "urgency": [
@@ -71,6 +98,21 @@ class ContextAnalyzer:
             r"\byou\s+must\b",
             r"\byou\s+need\s+to\b",
             r"\baccount\s+will\s+be\s+(?:blocked|closed|suspended)\b",
+
+                        # Hindi
+            r"\babhi\b",
+            r"\bturant\b",
+            r"\bतुरंत\b",
+            r"\bअभी\b",
+            r"\bजल्दी\b",
+            r"\bफौरन\b",
+            r"\bअभी\s+करें\b",
+
+            # Hinglish
+            r"\bjaldi\b",
+            r"\bturant\b",
+            r"\babhi\b",
+            r"\bimmediately\b",
         ],
 
         "threat_or_fear": [
@@ -83,6 +125,24 @@ class ContextAnalyzer:
             r"\baccount\s+will\s+be\s+(?:blocked|closed|suspended)\b",
             r"\byou\s+will\s+lose\b",
             r"\bsecurity\s+breach\b",
+
+                        # Hindi
+            r"\bखाता\s+बंद\b",
+            r"\bअकाउंट\s+बंद\b",
+            r"\bखाता\s+ब्लॉक\b",
+            r"\bअकाउंट\s+ब्लॉक\b",
+            r"\bगिरफ्तार\b",
+            r"\bपुलिस\b",
+            r"\bकार्रवाई\b",
+            r"\bजुर्माना\b",
+            r"\bसस्पेंड\b",
+
+            # Hinglish
+            r"\baccount\s+band\b",
+            r"\baccount\s+block\b",
+            r"\baccount\s+suspend\b",
+            r"\bpolice\b",
+            r"\bkarwai\b",
         ],
 
         "authority_impersonation": [
@@ -94,6 +154,19 @@ class ContextAnalyzer:
             r"\bfrom\s+(?:the\s+)?government\b",
             r"\bi(?:'m| am)\s+your\s+(?:boss|manager|supervisor)\b",
             r"\bi(?:'m| am)\s+your\s+(?:son|daughter|brother|sister|father|mother)\b",
+
+                        # Hindi
+            r"\bबैंक\s+से\b",
+            r"\bबैंक\s+का\s+कर्मचारी\b",
+            r"\bबैंक\s+अधिकारी\b",
+            r"\bकस्टमर\s+केयर\b",
+            r"\bकस्टमर\s+सपोर्ट\b",
+
+            # Hinglish
+            r"\bbank\s+se\b",
+            r"\bbank\s+ka\s+employee\b",
+            r"\bcustomer\s+care\b",
+            r"\bcustomer\s+support\b",
         ],
 
         "secrecy_or_isolation": [
@@ -144,6 +217,24 @@ class ContextAnalyzer:
             r"\bpan\s+number\b",
             r"\bsocial\s+security\b",
             r"\bpersonal\s+information\b",
+
+                        # Hindi
+            r"\bव्यक्तिगत\s+जानकारी\b",
+            r"\bनिजी\s+जानकारी\b",
+            r"\bफोन\s+नंबर\b",
+            r"\bमोबाइल\s+नंबर\b",
+            r"\bपता\b",
+            r"\bजन्म\s+तिथि\b",
+            r"\bआधार\b",
+            r"\bपैन\s+नंबर\b",
+
+            # Hinglish
+            r"\bpersonal\s+details\b",
+            r"\bpersonal\s+information\b",
+            r"\bphone\s+number\b",
+            r"\bmobile\s+number\b",
+            r"\baadhaar\b",
+            r"\bpan\s+number\b",
         ],
     }
 

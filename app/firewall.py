@@ -165,9 +165,6 @@ class VoiceSecurityFirewall:
 
         # Preserve the caller-provided analysis transcript.
         # Do not overwrite it here.
-        detected_language = None
-        language_probability = None
-        transcription_provider = None
 
         # ------------------------------------------------------------
         # MULTILINGUAL CONTEXT ANALYSIS

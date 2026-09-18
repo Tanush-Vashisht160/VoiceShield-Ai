@@ -1343,6 +1343,16 @@ async def live_call(websocket: WebSocket):
         return
 
     audio_buffer = bytearray()
+    # --------------------------------------------------------
+    # TRUSTED SPEAKER REFERENCE
+    # --------------------------------------------------------
+
+    reference_analysis_path = None
+    reference_temp_path = None
+    reference_converted_path = None
+
+    reference_expected = False
+    reference_extension = ".wav"
 
     # 3 seconds of PCM16 mono @ 16 kHz
     SAMPLE_RATE = 16000
@@ -1372,7 +1382,167 @@ async def live_call(websocket: WebSocket):
 
         while True:
 
-            data = await websocket.receive_bytes()
+            message = await websocket.receive()
+
+            # --------------------------------------------------------
+            # WebSocket disconnected
+            # --------------------------------------------------------
+
+            if message.get("type") == "websocket.disconnect":
+                break
+
+            # --------------------------------------------------------
+            # TEXT CONTROL MESSAGE
+            # --------------------------------------------------------
+
+            text_message = message.get("text")
+
+            if text_message is not None:
+
+                try:
+
+                    payload = json.loads(
+                        text_message
+                    )
+
+                except json.JSONDecodeError:
+
+                    await websocket.send_json({
+                        "event": "error",
+                        "message": (
+                            "Invalid WebSocket control message."
+                        ),
+                    })
+
+                    continue
+
+                if (
+                    payload.get("type")
+                    == "trusted_speaker_reference"
+                ):
+
+                    filename = Path(
+                        payload.get(
+                            "filename",
+                            "reference.wav"
+                        )
+                    ).name
+
+                    reference_extension = (
+                        Path(filename)
+                        .suffix
+                        .lower()
+                    )
+
+                    allowed_reference_extensions = {
+                        ".wav",
+                        ".mp3",
+                        ".flac",
+                        ".ogg",
+                        ".webm",
+                        ".m4a",
+                        ".aac",
+                        ".opus",
+                        ".oga",
+                    }
+
+                    if (
+                        reference_extension
+                        not in allowed_reference_extensions
+                    ):
+
+                        await websocket.send_json({
+                            "event": "error",
+                            "message": (
+                                "Unsupported trusted speaker "
+                                "reference format."
+                            ),
+                        })
+
+                        continue
+
+                    reference_expected = True
+
+                    print(
+                        "[LIVE] Waiting for trusted "
+                        "speaker reference bytes..."
+                    )
+
+                continue
+
+            # --------------------------------------------------------
+            # BINARY MESSAGE
+            # --------------------------------------------------------
+
+            data = message.get("bytes")
+
+            if not data:
+                continue
+
+            # --------------------------------------------------------
+            # FIRST BINARY MESSAGE AFTER THE CONTROL MESSAGE
+            # = TRUSTED SPEAKER REFERENCE
+            # --------------------------------------------------------
+
+            if reference_expected:
+
+                reference_temp_path = (
+                    RUNTIME_DIR
+                    / (
+                        f"live_reference_"
+                        f"{session_id}"
+                        f"{reference_extension}"
+                    )
+                )
+
+                reference_temp_path.write_bytes(
+                    data
+                )
+
+                reference_analysis_path = (
+                    reference_temp_path
+                )
+
+                # Browser recordings such as WebM/Opus
+                # need conversion before SpeechBrain
+                # speaker verification.
+                if reference_extension in {
+                    ".webm",
+                    ".m4a",
+                    ".aac",
+                    ".opus",
+                    ".oga",
+                }:
+
+                    reference_converted_path = (
+                        convert_audio_to_wav(
+                            reference_temp_path
+                        )
+                    )
+
+                    reference_analysis_path = (
+                        reference_converted_path
+                    )
+
+                reference_expected = False
+
+                print(
+                    "[LIVE] Trusted speaker reference loaded:",
+                    reference_analysis_path
+                )
+
+                await websocket.send_json({
+                    "event": "reference_ready",
+                    "message": (
+                        "Trusted speaker reference loaded."
+                    ),
+                })
+
+                continue
+
+            # --------------------------------------------------------
+            # NORMAL MICROPHONE PCM AUDIO
+            # --------------------------------------------------------
 
             audio_buffer.extend(data)
 
@@ -1500,7 +1670,7 @@ async def live_call(websocket: WebSocket):
                     result = await asyncio.to_thread(
                         firewall.analyze_call,
                         temp_path,
-                        None,
+                        reference_analysis_path,
                         None,
                         None,
                         transcript_text,
@@ -1548,6 +1718,34 @@ async def live_call(websocket: WebSocket):
                     temp_path.unlink(
                         missing_ok=True
                     )
+
+                    try:
+
+                        if (
+                            reference_temp_path
+                            and reference_temp_path.exists()
+                        ):
+
+                            reference_temp_path.unlink(
+                                missing_ok=True
+                            )
+
+                    except Exception:
+                        pass
+
+                    try:
+
+                        if (
+                            reference_converted_path
+                            and reference_converted_path.exists()
+                        ):
+
+                            reference_converted_path.unlink(
+                                missing_ok=True
+                            )
+
+                    except Exception:
+                        pass
 
     except WebSocketDisconnect:
 

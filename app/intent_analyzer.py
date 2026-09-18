@@ -36,6 +36,15 @@ class IntentAnalyzer:
             r"\b(?:share|provide|send)\b.{0,40}\bcard\s+details\b",
             r"\b(?:share|provide|send)\b.{0,40}\blogin\s+details\b",
             r"\b(?:share|provide|send)\b.{0,40}\bcredentials\b",
+
+            # Hindi
+            r"\bपासवर्ड\s+(?:बताओ|बताइए|दो|दीजिए)\b",
+            r"\bपिन\s+(?:बताओ|बताइए|दो|दीजिए)\b",
+            r"\bपासवर्ड\s+बताएं\b",
+
+            # Hinglish
+            r"\bpassword\s+(?:batao|bataiye|bataye|do|dijiye)\b",
+            r"\bpin\s+(?:batao|bataiye|bataye|do|dijiye)\b",
         ],
 
         "otp_disclosure": [
@@ -44,6 +53,14 @@ class IntentAnalyzer:
             r"(?:one[\s-]?time\s+password|verification\s+code)\b",
             r"\b(?:read|dictate)\b.{0,30}\botp\b",
             r"\b(?:read|dictate)\b.{0,30}\bverification\s+code\b",
+
+            # Hindi
+            r"\bओटीपी\s+(?:बताओ|बताइए|बताना|दो|दीजिए)\b",
+            r"\bओटीपी\s+बताएं\b",
+            r"\bवेरिफिकेशन\s+कोड\s+(?:बताओ|बताइए|दो|दीजिए)\b",
+
+            # Hinglish
+            r"\botp\s+(?:batao|bataiye|bataye|do|dijiye)\b",
         ],
 
         "financial_transfer": [
@@ -53,6 +70,17 @@ class IntentAnalyzer:
             r"\b(?:pay|send|transfer)\b.{0,30}\b(?:amount|funds)\b",
             r"\b(?:buy|purchase)\b.{0,40}\b(?:gift\s+card|voucher)\b",
             r"\b(?:send|transfer)\b.{0,40}\bcrypto(?:currency)?\b",
+
+                        # Hindi
+            r"\bपैसे\s+(?:भेजो|भेजें|भेजिए|ट्रांसफर)\b",
+            r"\bपैसा\s+ट्रांसफर\b",
+            r"\bपैसे\s+ट्रांसफर\b",
+            r"\bभुगतान\s+करें\b",
+
+            # Hinglish
+            r"\bpaise\s+(?:bhejo|bhejen|bhejiye)\b",
+            r"\bpaise\s+transfer\b",
+            r"\bmoney\s+transfer\b",
         ],
 
         "link_interaction": [

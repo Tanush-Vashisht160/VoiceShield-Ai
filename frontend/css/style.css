@@ -1622,9 +1622,9 @@ body {
 
     stroke-linecap: round;
 
-    stroke-dasharray: 578;
+    stroke-dasharray: 578.05;
 
-    stroke-dashoffset: 578;
+    stroke-dashoffset: 578.05;
 
     transition:
         stroke-dashoffset 1s ease;
@@ -3475,4 +3475,357 @@ body.security-danger .prediction-badge {
 
 #reference-file-preview {
     margin-top: 10px;
+}
+
+
+/* ============================================================
+   LIVE DETECTION TIMELINE ITEMS
+============================================================ */
+
+#live-timeline {
+    max-height: 300px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+
+/* Waiting state */
+
+.live-timeline-empty {
+
+    min-height: 70px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    gap: 10px;
+
+    padding: 18px;
+
+    border:
+        1px dashed
+        rgba(120, 255, 220, 0.12);
+
+    border-radius: 12px;
+
+    color: var(--text-muted);
+
+    font-size: 0.72rem;
+
+    letter-spacing: 0.04em;
+
+}
+
+
+.timeline-empty-dot {
+
+    width: 7px;
+
+    height: 7px;
+
+    border-radius: 50%;
+
+    background: var(--neon);
+
+    box-shadow:
+        0 0 12px
+        rgba(86, 255, 208, 0.5);
+
+    animation:
+        timelinePulse 1.6s ease-in-out infinite;
+
+}
+
+
+@keyframes timelinePulse {
+
+    0%,
+    100% {
+        opacity: 0.35;
+        transform: scale(0.85);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1.15);
+    }
+
+}
+
+
+/* Individual detection */
+
+.live-timeline-item {
+
+    position: relative;
+
+    display: flex;
+
+    align-items: stretch;
+
+    gap: 12px;
+
+    padding: 12px 14px;
+
+    border:
+        1px solid
+        rgba(255,255,255,0.06);
+
+    border-radius: 12px;
+
+    background:
+        rgba(255,255,255,0.018);
+
+    transition:
+        background 0.2s ease,
+        border-color 0.2s ease,
+        transform 0.2s ease;
+
+}
+
+
+.live-timeline-item:hover {
+
+    transform:
+        translateX(2px);
+
+    background:
+        rgba(255,255,255,0.035);
+
+    border-color:
+        rgba(120,255,220,0.16);
+
+}
+
+
+/* Marker */
+
+.timeline-event-marker {
+
+    width: 10px;
+
+    display: flex;
+
+    justify-content: center;
+
+    padding-top: 5px;
+
+    flex-shrink: 0;
+
+}
+
+
+.timeline-event-marker span {
+
+    width: 7px;
+
+    height: 7px;
+
+    border-radius: 50%;
+
+    background:
+        var(--neon);
+
+    box-shadow:
+        0 0 10px
+        rgba(86,255,208,0.45);
+
+}
+
+
+/* High-risk marker */
+
+.live-timeline-item.high
+.timeline-event-marker span {
+
+    background:
+        var(--danger);
+
+    box-shadow:
+        0 0 10px
+        rgba(255,84,112,0.45);
+
+}
+
+
+/* Medium-risk marker */
+
+.live-timeline-item.medium
+.timeline-event-marker span {
+
+    background:
+        var(--warning);
+
+    box-shadow:
+        0 0 10px
+        rgba(255,209,102,0.45);
+
+}
+
+
+/* Content */
+
+.timeline-event-content {
+
+    min-width: 0;
+
+    flex: 1;
+
+}
+
+
+.timeline-event-top {
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    gap: 12px;
+
+    margin-bottom: 5px;
+
+}
+
+
+.timeline-event-top strong {
+
+    font-size: 0.72rem;
+
+    letter-spacing: 0.08em;
+
+}
+
+
+.timeline-event-time {
+
+    color: var(--text-muted);
+
+    font-size: 0.65rem;
+
+    font-variant-numeric:
+        tabular-nums;
+
+}
+
+
+/* Event details */
+
+.timeline-event-details {
+
+    display: flex;
+
+    align-items: center;
+
+    flex-wrap: wrap;
+
+    gap: 7px;
+
+    color: var(--text-muted);
+
+    font-size: 0.62rem;
+
+    letter-spacing: 0.05em;
+
+}
+
+
+.timeline-event-details > span {
+
+    padding:
+        3px 6px;
+
+    border:
+        1px solid
+        rgba(255,255,255,0.06);
+
+    border-radius: 5px;
+
+}
+
+
+/* Voice prediction */
+
+.timeline-prediction.real {
+
+    color: var(--neon);
+
+}
+
+
+.timeline-prediction.fake {
+
+    color: var(--danger);
+
+}
+
+
+.timeline-prediction.unknown {
+
+    color: var(--text-muted);
+
+}
+
+
+/* Action */
+
+.timeline-action {
+
+    font-weight: 800;
+
+}
+
+
+.live-timeline-item.high
+.timeline-action {
+
+    color: var(--danger);
+
+}
+
+
+.live-timeline-item.medium
+.timeline-action {
+
+    color: var(--warning);
+
+}
+
+
+.live-timeline-item.low
+.timeline-action {
+
+    color: var(--neon);
+
+}
+
+
+/* Timeline scrollbar */
+
+#live-timeline::-webkit-scrollbar {
+
+    width: 4px;
+
+}
+
+
+#live-timeline::-webkit-scrollbar-track {
+
+    background:
+        rgba(255,255,255,0.02);
+
+}
+
+
+#live-timeline::-webkit-scrollbar-thumb {
+
+    background:
+        rgba(86,255,208,0.20);
+
+    border-radius: 10px;
+
 }

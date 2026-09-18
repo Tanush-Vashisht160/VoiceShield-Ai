@@ -547,7 +547,251 @@ function escapeHtml(value) {
     return div.innerHTML;
 }
 
+/* ============================================================
+   LIVE DETECTION TIMELINE
+============================================================ */
 
+function clearLiveDetectionTimeline() {
+
+    if (!liveTimeline) {
+        return;
+    }
+
+    liveTimeline.innerHTML = "";
+
+}
+
+
+function showLiveTimelineWaiting() {
+
+    if (!liveTimeline) {
+        return;
+    }
+
+    liveTimeline.innerHTML = `
+        <div class="live-timeline-empty">
+            <span class="timeline-empty-dot"></span>
+            <span>Waiting for live detection results...</span>
+        </div>
+    `;
+
+}
+
+
+function addLiveDetectionTimelineEvent(event) {
+
+    if (!liveTimeline || !event) {
+        return;
+    }
+
+    /*
+     * Only real chunk-analysis events belong in the
+     * detection timeline.
+     */
+    if (
+        event.event &&
+        event.event !== "chunk_analysis"
+    ) {
+        return;
+    }
+
+    /*
+     * Remove the waiting message when the first
+     * real detection arrives.
+     */
+    const emptyState =
+        liveTimeline.querySelector(
+            ".live-timeline-empty"
+        );
+
+    if (emptyState) {
+        emptyState.remove();
+    }
+
+    const chunkIndex =
+        Number(
+            event.live_chunk_index ??
+            event.chunk_index ??
+            0
+        );
+
+    const prediction =
+        String(
+            event.prediction || "unknown"
+        ).toUpperCase();
+
+    const fakeScore =
+        Number(
+            event.fake_score || 0
+        );
+
+    const riskScore =
+        Number(
+            event.risk_score || 0
+        );
+
+    const riskLevel =
+        String(
+            event.risk_level ||
+            getTimelineRiskLevel(riskScore)
+        ).toUpperCase();
+
+    const action =
+        String(
+            event.action ||
+            getTimelineAction(riskScore)
+        ).toUpperCase();
+
+    /*
+     * Use the live-call start time to show elapsed time.
+     */
+    let elapsedSeconds = 0;
+
+    if (liveStartTime) {
+
+        elapsedSeconds =
+            Math.max(
+                0,
+                Math.floor(
+                    (
+                        Date.now() -
+                        liveStartTime
+                    ) / 1000
+                )
+            );
+
+    }
+
+    const minutes =
+        String(
+            Math.floor(
+                elapsedSeconds / 60
+            )
+        ).padStart(2, "0");
+
+    const seconds =
+        String(
+            elapsedSeconds % 60
+        ).padStart(2, "0");
+
+    const riskClass =
+        riskLevel === "HIGH"
+            ? "high"
+            : riskLevel === "MEDIUM"
+                ? "medium"
+                : "low";
+
+    const predictionClass =
+        prediction === "FAKE"
+            ? "fake"
+            : prediction === "REAL"
+                ? "real"
+                : "unknown";
+
+    const item =
+        document.createElement("div");
+
+    item.className =
+        `live-timeline-item ${riskClass}`;
+
+    item.innerHTML = `
+
+        <div class="timeline-event-marker">
+            <span></span>
+        </div>
+
+        <div class="timeline-event-content">
+
+            <div class="timeline-event-top">
+
+                <strong>
+                    CHUNK ${String(
+                        chunkIndex + 1
+                    ).padStart(2, "0")}
+                </strong>
+
+                <span class="timeline-event-time">
+                    ${minutes}:${seconds}
+                </span>
+
+            </div>
+
+            <div class="timeline-event-details">
+
+                <span class="timeline-prediction ${predictionClass}">
+                    ${escapeHtml(prediction)}
+                </span>
+
+                <span>
+                    FAKE ${formatPercent(fakeScore)}
+                </span>
+
+                <span>
+                    RISK ${Math.round(riskScore)}
+                </span>
+
+                <span class="timeline-action">
+                    ${escapeHtml(action)}
+                </span>
+
+            </div>
+
+        </div>
+    `;
+
+    liveTimeline.appendChild(item);
+
+    /*
+     * Keep the timeline compact.
+     * The newest 12 detections remain visible.
+     */
+    while (
+        liveTimeline.children.length > 12
+    ) {
+
+        liveTimeline.removeChild(
+            liveTimeline.firstElementChild
+        );
+
+    }
+
+    /*
+     * Automatically keep the newest detection visible.
+     */
+    liveTimeline.scrollTop =
+        liveTimeline.scrollHeight;
+
+}
+
+
+function getTimelineRiskLevel(score) {
+
+    if (score >= 70) {
+        return "HIGH";
+    }
+
+    if (score >= 35) {
+        return "MEDIUM";
+    }
+
+    return "LOW";
+
+}
+
+
+function getTimelineAction(score) {
+
+    if (score >= 70) {
+        return "BLOCK";
+    }
+
+    if (score >= 35) {
+        return "WARN";
+    }
+
+    return "ALLOW";
+
+}
 /* ============================================================
    STATE MANAGEMENT
 ============================================================ */
@@ -1148,7 +1392,7 @@ function updateSecurityIntelligence(result) {
         result.speaker_verification || {};
 
     const context =
-        result.context || {};
+        result.context_analysis || {};
 
     const prediction =
         detection.prediction || "UNKNOWN";
@@ -1254,22 +1498,31 @@ function updateSecurityIntelligence(result) {
             "context-threat"
         );
 
+    /*
+    * Backend structure:
+    *
+    * result.context_analysis.score
+    * result.risk_inputs.context_risk_score
+    *
+    * Prefer risk_inputs because that is the
+    * exact value used by the RiskEngine.
+    */
+
     const contextScore =
         Number(
-            result.context_risk_score ??
-            context.context_risk_score ??
-            context.risk_score ??
+            result.risk_inputs?.context_risk_score ??
+            result.context_analysis?.score ??
             0
         );
 
     if (contextElement) {
 
-        if (contextScore >= 0.7) {
+        if (contextScore >= 0.70) {
 
             contextElement.textContent =
                 "HIGH";
 
-        } else if (contextScore >= 0.4) {
+        } else if (contextScore >= 0.35) {
 
             contextElement.textContent =
                 "MEDIUM";
@@ -3179,12 +3432,42 @@ updateLiveTranscriptDisplay();
 
         liveSocket.binaryType = "arraybuffer";
 
-        liveSocket.onopen = () => {
+        liveSocket.onopen = async () => {
 
             console.log(
                 "LIVE CALL WEBSOCKET CONNECTED"
             );
 
+            /*
+            * Send the trusted speaker reference BEFORE
+            * microphone PCM starts flowing.
+            */
+            try {
+
+                await sendLiveTrustedSpeakerReference();
+
+            } catch (error) {
+
+                console.error(
+                    "Failed to send trusted speaker reference:",
+                    error
+                );
+
+                showLiveCallError(
+                    "Trusted speaker reference could not be loaded."
+                );
+
+                stopLiveCall(
+                    "Trusted speaker reference error"
+                );
+
+                return;
+            }
+
+            /*
+            * Start microphone audio only after the
+            * trusted reference has been sent.
+            */
             beginLiveAudio();
 
             liveRunning = true;
@@ -3197,9 +3480,8 @@ updateLiveTranscriptDisplay();
                 );
             }
 
-            if (liveTimeline) {
-                liveTimeline.innerHTML = "";
-            }
+            clearLiveDetectionTimeline();
+            showLiveTimelineWaiting();
 
             liveStartTime =
                 Date.now();
@@ -3265,6 +3547,79 @@ updateLiveTranscriptDisplay();
         );
 
     }
+}
+async function sendLiveTrustedSpeakerReference() {
+
+    /*
+     * No trusted speaker was selected.
+     * Live call can still operate normally.
+     */
+    if (!referenceFile) {
+
+        console.log(
+            "No trusted speaker reference selected."
+        );
+
+        return;
+    }
+
+    if (
+        !liveSocket ||
+        liveSocket.readyState !== WebSocket.OPEN
+    ) {
+
+        throw new Error(
+            "Live WebSocket is not connected."
+        );
+    }
+
+    /*
+     * Make sure the reference has a usable filename.
+     */
+    const uploadableReference =
+        getUploadableAudioFile(
+            referenceFile
+        );
+
+    console.log(
+        "Sending trusted speaker reference:",
+        uploadableReference.name
+    );
+
+    /*
+     * First send a small control message.
+     *
+     * The backend uses this to know that the
+     * NEXT binary WebSocket message is the
+     * trusted speaker reference.
+     */
+    liveSocket.send(
+        JSON.stringify({
+            type: "trusted_speaker_reference",
+            filename:
+                uploadableReference.name,
+            content_type:
+                uploadableReference.type ||
+                "audio/webm"
+        })
+    );
+
+    /*
+     * Read the selected audio file as raw bytes.
+     */
+    const referenceBuffer =
+        await uploadableReference.arrayBuffer();
+
+    /*
+     * Send the actual reference audio.
+     */
+    liveSocket.send(
+        referenceBuffer
+    );
+
+    console.log(
+        "Trusted speaker reference sent successfully."
+    );
 }
 
 function beginLiveAudio() {
@@ -4646,7 +5001,9 @@ function handleLiveAnalysisEvent(event) {
         renderLiveChunkResult(
             event
         );
-
+        addLiveDetectionTimelineEvent(
+            event
+        );
         if (window.voiceShieldLiveMonitor) {
             window.voiceShieldLiveMonitor.analyzed(
                 event.live_chunk_index

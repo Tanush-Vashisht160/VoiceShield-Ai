@@ -147,3 +147,49 @@ def test_empty_text(analyzer):
 def test_invalid_input(analyzer):
     with pytest.raises(TypeError):
         analyzer.analyze(None)
+
+def test_bank_account_lock_scam_is_high_risk():
+    analyzer = ContextAnalyzer()
+
+    text = (
+        "Dear customer, your bank account has been locked "
+        "due to suspicious activity. Press 1 immediately "
+        "to speak with an executive and verify your details "
+        "to prevent permanent blocking."
+    )
+
+    result = analyzer.analyze(text)
+
+    assert result["score"] >= 0.70
+    assert result["level"] == "HIGH"
+    assert result["action"] == "BLOCK"
+    assert "financial" in result["matched_categories"]
+    assert "urgency" in result["matched_categories"]
+
+def test_hindi_bank_scam_is_detected():
+    analyzer = ContextAnalyzer()
+
+    text = (
+        "आपका बैंक अकाउंट संदिग्ध गतिविधि के कारण "
+        "बंद कर दिया गया है। तुरंत अपनी जानकारी सत्यापित करें।"
+    )
+
+    result = analyzer.analyze(text)
+
+    assert result["score"] > 0
+    assert result["level"] in {"MEDIUM", "HIGH"}
+    assert len(result["matched_categories"]) > 0
+
+def test_hinglish_bank_scam_is_detected():
+    analyzer = ContextAnalyzer()
+
+    text = (
+        "Aapka bank account suspicious activity ki wajah se "
+        "block ho gaya hai. Turant apni personal details verify kijiye."
+    )
+
+    result = analyzer.analyze(text)
+
+    assert result["score"] > 0
+    assert result["level"] in {"MEDIUM", "HIGH"}
+    assert len(result["matched_categories"]) > 0
